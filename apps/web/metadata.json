@@ -1,0 +1,6 @@
+{
+  "name": "Triagem Médica IA",
+  "description": "Aplicativo acolhedor de pré-triagem médica adaptativa para pacientes antes ou durante a fila do pronto-socorro.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
