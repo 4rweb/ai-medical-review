@@ -1,7 +1,13 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
 allowBuilds:
   '@google/genai': true
   esbuild: true
   protobufjs: true
+  '@nestjs/core': true
+  '@scarf/scarf': true
+
 minimumReleaseAgeExclude:
-  - '@google/genai@2.9.0'
   - '@types/node@26.0.0'

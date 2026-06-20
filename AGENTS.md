@@ -57,30 +57,36 @@ por vários tracks; aprofundar o que já é Track 4.
 
 ## 3. Arquitetura do sistema
 
+> **Atualização (monorepo separado):** o front e o back agora são apps
+> isolados num workspace pnpm. O frontend chama `/api/*` na mesma origem e um
+> **proxy BFF** (Vite em dev / rewrite do host em prod) encaminha para o NestJS
+> injetando um **segredo no lado do servidor** — o segredo nunca chega ao browser.
+
 ```
-App do paciente (Next.js)  ─┐
-                            ├─►  Backend API (Node.js/TS · Alibaba Function Compute)
-Painel admin (Next.js)     ─┘            │
-                                         ▼
+apps/web (Vite + React)  ──/api/* (mesma origem)──┐
+   proxy BFF injeta x-internal-api-key            │
+                                                  ▼
+                         apps/apis (NestJS)  ·  guard de segredo + CORS + rate-limit
+                                         │
                             Pipeline multi-agente
                             Coletor → Classificador → Agendador
                                          │
                             ┌────────────┴────────────┐
                             ▼                         ▼
-                     Qwen Cloud (DashScope)      ApsaraDB
+                     Qwen Cloud (DashScope)      (futuro) ApsaraDB
                      raciocínio dos agentes      triagens · auditoria
-                                                   ▲
-                            painel admin lê ───────┘
+
+  packages/contracts (@medical/contracts) — contrato tipado compartilhado
 ```
 
-- **Frontend:** React + **TanStack** (Router, Query, Form, Store) + Tailwind
-  + DaisyUI. Pode ficar na **Vercel** (frontend não é "backend").
-- **Backend:** **Node.js + TypeScript** na **Alibaba Function Compute**.
-  Escolha por Node/TS para **compartilhar o mesmo contrato tipado**
-  (`triagem.contract.ts`) entre front e back, sem drift.
+- **Frontend (`apps/web`):** React + Tailwind + DaisyUI (Vite). **Somente
+  frontend** — sem lógica de servidor. Pode ficar na **Vercel**.
+- **Backend (`apps/apis`):** **NestJS (Node.js + TypeScript)**. Expõe
+  `/api/triage/*` e blinda o acesso (segredo BFF + CORS allowlist + throttler).
+  Compartilha o contrato tipado via **`@medical/contracts`**, sem drift.
 - **IA:** **Qwen Cloud** via API DashScope (compatível com OpenAI):
-  `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`.
-  No Node, usa-se o próprio SDK da OpenAI trocando `baseURL` e `apiKey`.
+  `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`. Usa-se o SDK
+  `openai` trocando `baseURL` e `apiKey`. Modelo atual: **`qwen3.6-flash`**.
 - **Banco:** **ApsaraDB** (gerenciado, Alibaba) — guarda as triagens e
   alimenta o painel/fila em tempo real (WebSocket ou polling).
 

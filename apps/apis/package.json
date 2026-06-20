@@ -1,0 +1,33 @@
+{
+  "name": "apis",
+  "private": true,
+  "version": "0.0.1",
+  "description": "AI Medical Review — Backend NestJS (triagem)",
+  "scripts": {
+    "dev": "nest start --watch",
+    "build": "nest build",
+    "start": "node dist/main.js",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@medical/contracts": "workspace:*",
+    "@nestjs/common": "^11.1.27",
+    "@nestjs/config": "^4.0.4",
+    "@nestjs/core": "^11.1.27",
+    "@nestjs/platform-express": "^11.1.27",
+    "@nestjs/throttler": "^6.5.0",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
+    "helmet": "^8.2.0",
+    "openai": "^6.44.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.23",
+    "@nestjs/schematics": "^11.1.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.0.0",
+    "typescript": "~6.0.3"
+  }
+}

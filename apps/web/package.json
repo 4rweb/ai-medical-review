@@ -1,36 +1,31 @@
 {
-  "name": "react-example",
+  "name": "web",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
-    "start": "node dist/server.cjs",
-    "clean": "rm -rf dist server.js",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@google/genai": "^2.9.0",
+    "@medical/contracts": "workspace:*",
     "@tailwindcss/vite": "^4.3.1",
     "daisyui": "^5.5.23",
-    "dotenv": "^17.4.2",
-    "express": "^5.2.1",
     "lucide-react": "^1.21.0",
     "motion": "^12.40.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
-    "@types/express": "^5.0.6",
     "@types/node": "^26.0.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
     "autoprefixer": "^10.5.0",
-    "esbuild": "^0.28.1",
     "tailwindcss": "^4.3.1",
-    "tsx": "^4.22.4",
     "typescript": "~6.0.3",
     "vite": "^8.0.16"
   }

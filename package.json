@@ -1,0 +1,17 @@
+{
+  "name": "ai-medical-review",
+  "private": true,
+  "version": "0.0.0",
+  "description": "AI Medical Review — monorepo (frontend Vite/React + backend NestJS)",
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c blue,green \"pnpm dev:apis\" \"pnpm dev:web\"",
+    "dev:web": "pnpm --filter web dev",
+    "dev:apis": "pnpm --filter apis dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.3"
+  },
+  "packageManager": "pnpm@11.8.0"
+}

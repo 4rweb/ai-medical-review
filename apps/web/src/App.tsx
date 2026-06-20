@@ -36,7 +36,7 @@ import {
   MANCHESTER,
   SintomaExtraido,
   QueuePatient
-} from './TriageContracts'
+} from '@medical/contracts'
 
 const extractSymptomKeywordsFromText = (text: string): string[] => {
   if (!text) return []

@@ -1,20 +1,25 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# apps/web — Frontend (Vite + React)
 
-# Run and deploy your AI Studio app
+Aplicação do paciente (Protocolo de Manchester). **Somente frontend** — toda
+a lógica de IA e de fila vive no backend NestJS (`apps/apis`).
 
-This contains everything you need to run your app locally.
+## Rodar localmente
 
-View your app in AI Studio: https://ai.studio/apps/3094a7ee-e2d2-4217-b774-073b607e7078
+Pré-requisitos: Node 20+, pnpm 11+. Rode `pnpm install` na **raiz** do monorepo.
 
-## Run Locally
+```bash
+# 1. Suba o backend (em apps/apis): pnpm dev:apis  (porta 3001)
+# 2. Configure o .env (copie de .env.example). O INTERNAL_API_KEY DEVE ser
+#    igual ao do apps/apis/.env — ele é usado só pelo proxy do Vite (servidor).
+cp .env.example .env
 
-**Prerequisites:**  Node.js
+# 3. Suba o frontend:
+pnpm dev            # http://localhost:3000
+```
 
+## Como fala com a API
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+O código chama `/api/*` na mesma origem. O **proxy do Vite**
+(`vite.config.ts`) encaminha para o NestJS injetando o header
+`x-internal-api-key` no lado do servidor — o segredo nunca vai ao browser.
+Em produção (build estático), o host deve fazer esse hop com o segredo.
