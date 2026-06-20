@@ -1,33 +1,33 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-@import "tailwindcss";
+@import 'tailwindcss';
 @variant dark (&:where(.dark, .dark *));
 @plugin "daisyui";
 
 @plugin "daisyui/theme" {
-  name: "night";
+  name: 'night';
   default: false;
   prefersdark: false;
-  color-scheme: "dark";
-  --color-base-100: oklch(20.768% 0.039 265.754);
-  --color-base-200: oklch(19.314% 0.037 265.754);
-  --color-base-300: oklch(17.86% 0.034 265.754);
-  --color-base-content: oklch(84.153% 0.007 265.754);
-  --color-primary: oklch(75.351% 0.138 232.661);
-  --color-primary-content: oklch(15.07% 0.027 232.661);
-  --color-secondary: oklch(68.011% 0.158 276.934);
-  --color-secondary-content: oklch(13.602% 0.031 276.934);
-  --color-accent: oklch(72.36% 0.176 350.048);
-  --color-accent-content: oklch(14.472% 0.035 350.048);
-  --color-neutral: oklch(27.949% 0.036 260.03);
-  --color-neutral-content: oklch(85.589% 0.007 260.03);
-  --color-info: oklch(68.455% 0.148 237.251);
-  --color-info-content: oklch(0% 0 0);
-  --color-success: oklch(78.452% 0.132 181.911);
-  --color-success-content: oklch(15.69% 0.026 181.911);
-  --color-warning: oklch(83.242% 0.139 82.95);
-  --color-warning-content: oklch(16.648% 0.027 82.95);
-  --color-error: oklch(71.785% 0.17 13.118);
-  --color-error-content: oklch(14.357% 0.034 13.118);
+  color-scheme: 'dark';
+  --color-base-100: oklch(24.353% 0 0);
+  --color-base-200: oklch(22.648% 0 0);
+  --color-base-300: oklch(20.944% 0 0);
+  --color-base-content: oklch(98% 0.003 247.858);
+  --color-primary: #e60076;
+  --color-primary-content: oklch(96% 0.015 12.422);
+  --color-secondary: oklch(94% 0.03 12.58);
+  --color-secondary-content: oklch(64% 0.246 16.439);
+  --color-accent: oklch(67.271% 0.167 35.791);
+  --color-accent-content: oklch(13.454% 0.033 35.791);
+  --color-neutral: oklch(27.441% 0.013 253.041);
+  --color-neutral-content: oklch(85.488% 0.002 253.041);
+  --color-info: oklch(62.616% 0.143 240.033);
+  --color-info-content: oklch(12.523% 0.028 240.033);
+  --color-success: oklch(64% 0.2 131.684);
+  --color-success-content: oklch(14.045% 0.018 156.596);
+  --color-warning: oklch(90% 0.182 98.111);
+  --color-warning-content: oklch(14% 0.004 49.25);
+  --color-error: oklch(51.61% 0.146 29.674);
+  --color-error-content: oklch(90.322% 0.029 29.674);
   --radius-selector: 1rem;
   --radius-field: 0.5rem;
   --radius-box: 1rem;
@@ -39,30 +39,30 @@
 }
 
 @plugin "daisyui/theme" {
-  name: "light";
+  name: 'light';
   default: false;
   prefersdark: false;
-  color-scheme: "light";
+  color-scheme: 'light';
   --color-base-100: oklch(100% 0 0);
-  --color-base-200: oklch(97.5% 0.005 245);
-  --color-base-300: oklch(91.5% 0.012 245);
-  --color-base-content: oklch(22% 0.015 245);
-  --color-primary: oklch(56.12% 0.169 245.2);
-  --color-primary-content: oklch(100% 0 0);
-  --color-secondary: oklch(48% 0.13 245);
-  --color-secondary-content: oklch(100% 0 0);
-  --color-accent: oklch(62% 0.14 185);
-  --color-accent-content: oklch(100% 0 0);
-  --color-neutral: oklch(28% 0.015 245);
-  --color-neutral-content: oklch(98% 0.003 245);
-  --color-info: oklch(64% 0.13 235);
-  --color-info-content: oklch(100% 0 0);
-  --color-success: oklch(68% 0.14 145);
-  --color-success-content: oklch(100% 0 0);
-  --color-warning: oklch(76% 0.15 85);
-  --color-warning-content: oklch(20% 0.04 85);
-  --color-error: oklch(62% 0.17 15);
-  --color-error-content: oklch(100% 0 0);
+  --color-base-200: oklch(97.466% 0.011 259.822);
+  --color-base-300: oklch(93.268% 0.016 262.751);
+  --color-base-content: oklch(41.886% 0.053 255.824);
+  --color-primary: oklch(56.86% 0.255 257.57);
+  --color-primary-content: oklch(27% 0.041 260.031);
+  --color-secondary: oklch(42.551% 0.161 282.339);
+  --color-secondary-content: oklch(88.51% 0.032 282.339);
+  --color-accent: oklch(59.939% 0.191 335.171);
+  --color-accent-content: oklch(11.988% 0.038 335.171);
+  --color-neutral: oklch(19.616% 0.063 257.651);
+  --color-neutral-content: oklch(83.923% 0.012 257.651);
+  --color-info: oklch(88.127% 0.085 214.515);
+  --color-info-content: oklch(17.625% 0.017 214.515);
+  --color-success: oklch(80.494% 0.077 197.823);
+  --color-success-content: oklch(16.098% 0.015 197.823);
+  --color-warning: oklch(89.172% 0.045 71.47);
+  --color-warning-content: oklch(17.834% 0.009 71.47);
+  --color-error: oklch(73.092% 0.11 20.076);
+  --color-error-content: oklch(14.618% 0.022 20.076);
   --radius-selector: 1rem;
   --radius-field: 0.5rem;
   --radius-box: 1rem;
@@ -74,14 +74,15 @@
 }
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Space Grotesk", sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Space Grotesk', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
 }
 
 /* Custom continuous ripple animation for peaceful breathing indicator */
 @keyframes soft-pulse {
-  0%, 100% {
+  0%,
+  100% {
     transform: scale(1);
     opacity: 0.3;
   }
@@ -104,7 +105,7 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(156, 163, 175, 0.3);
+  background: #e60076;
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {

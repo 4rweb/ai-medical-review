@@ -4,6 +4,7 @@ import { APP_GUARD } from '@nestjs/core'
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler'
 import { ApiKeyGuard } from './common/api-key.guard'
 import { HealthController } from './health.controller'
+import { DbModule } from './db/db.module'
 import { TriageModule } from './triage/triage.module'
 
 @Module({
@@ -11,6 +12,7 @@ import { TriageModule } from './triage/triage.module'
     ConfigModule.forRoot({ isGlobal: true }),
     // Rate-limit: 60 requisições por minuto, por IP.
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 60 }]),
+    DbModule,
     TriageModule
   ],
   controllers: [HealthController],

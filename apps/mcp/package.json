@@ -1,0 +1,27 @@
+{
+  "name": "mcp",
+  "private": true,
+  "version": "0.0.1",
+  "description": "AI Medical Review — servidor MCP expondo as ferramentas clínicas",
+  "type": "module",
+  "scripts": {
+    "dev": "MCP_TRANSPORT=http tsx watch src/server.ts",
+    "start": "MCP_TRANSPORT=http tsx src/server.ts",
+    "start:stdio": "tsx src/server.ts",
+    "inspect": "mcp-inspector tsx src/server.ts",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@medical/clinical": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "express": "^5.2.1",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/inspector": "^0.22.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.0.0",
+    "tsx": "^4.22.4",
+    "typescript": "~6.0.3"
+  }
+}

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   Activity,
   ChevronRight,
@@ -25,18 +25,34 @@ import {
   RefreshCw,
   Smile,
   Meh,
-  Frown
+  Frown,
+  CalendarClock,
+  MapPin
 } from 'lucide-react'
 import { PatientDetails, SymptomInput, Vitals, ManchesterColor } from './types'
 import {
+  AlertaEmergencia,
+  AnalisarRelatoRequestSchema,
+  ClassificarRequestSchema,
   PerguntaAdaptativa,
   RespostaAdaptativa,
   ClassificarResponse,
   NivelManchester,
   MANCHESTER,
   SintomaExtraido,
-  QueuePatient
+  RedFlag,
+  SinaisVitais,
+  TriagemFilaSubmitRequestSchema,
+  isRespostaPreenchida
 } from '@medical/contracts'
+import {
+  useAnalyzeTriageMutation,
+  useClassifyTriageMutation,
+  useSubmitTriageQueueMutation,
+  useTranscribeMutation,
+  useTriageQueue
+} from './triage/query'
+import { blobToWavBase64 } from './triage/audio'
 
 const extractSymptomKeywordsFromText = (text: string): string[] => {
   if (!text) return []
@@ -156,6 +172,7 @@ export default function App() {
     age: 41,
     sex: ''
   })
+  const [ageConfirmed, setAgeConfirmed] = useState<boolean>(false)
 
   // Consent
   const [hasConsent, setHasConsent] = useState<boolean>(false)
@@ -166,7 +183,8 @@ export default function App() {
     audioLogged: false
   })
 
-  // Audio Recording states (simulation)
+  // Voice input remains visible in the existing layout, but is disabled until
+  // a real speech-to-text integration is available.
   const [isRecording, setIsRecording] = useState<boolean>(false)
   const [recordingSeconds, setRecordingSeconds] = useState<number>(0)
   const [audioTranscript, setAudioTranscript] = useState<string>('')
@@ -174,7 +192,6 @@ export default function App() {
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false)
 
   // AI analysis and adaptive questions state
-  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false)
   const [detectedSymptoms, setDetectedSymptoms] = useState<SintomaExtraido[]>(
     []
   )
@@ -182,9 +199,15 @@ export default function App() {
     PerguntaAdaptativa[]
   >([])
   const [answers, setAnswers] = useState<RespostaAdaptativa[]>([])
+  const [sessionId, setSessionId] = useState<string>('')
+  const [collectorRedFlags, setCollectorRedFlags] = useState<RedFlag[]>([])
+  const [emergencyAlert, setEmergencyAlert] =
+    useState<AlertaEmergencia | null>(null)
+  const [collectorModelVersion, setCollectorModelVersion] =
+    useState<string>('')
 
   // Pain indicator state
-  const [painLevel, setPainLevel] = useState<number>(7)
+  const [painLevel, setPainLevel] = useState<number | undefined>(undefined)
 
   // Vitals state
   const [vitals, setVitals] = useState<Vitals>({
@@ -194,22 +217,37 @@ export default function App() {
     saturation: ''
   })
 
-  // Triage Result loading and details
-  const [isClassifying, setIsClassifying] = useState<boolean>(false)
+  // Triage Result details
   const [result, setResult] = useState<ClassificarResponse | null>(null)
+  const [appointmentConfirmed, setAppointmentConfirmed] =
+    useState<boolean>(false)
 
-  // Real-time Triage Team Queue state
-  const [queueList, setQueueList] = useState<QueuePatient[]>([])
-  const [myQueueItem, setMyQueueItem] = useState<QueuePatient | null>(null)
-  const [isLoadingQueue, setIsLoadingQueue] = useState<boolean>(false)
+  // Server state
+  const analyzeMutation = useAnalyzeTriageMutation()
+  const classifyMutation = useClassifyTriageMutation()
+  const submitQueueMutation = useSubmitTriageQueueMutation()
+  const transcribeMutation = useTranscribeMutation()
+  const [isTranscribing, setIsTranscribing] = useState<boolean>(false)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  const mediaStreamRef = useRef<MediaStream | null>(null)
+  const queueQuery = useTriageQueue(step === 8)
+  const queueList = queueQuery.data?.queue ?? []
+  const myQueueItem =
+    queueList.find(queuePatient => queuePatient.sessaoId === sessionId) ?? null
+  const isClassifying = classifyMutation.isPending
+  const isLoadingQueue = submitQueueMutation.isPending
 
   // Modals / Feedback
   const [emergencyCallModal, setEmergencyCallModal] = useState<boolean>(false)
   const [customToast, setCustomToast] = useState<string | null>(null)
 
   const [showQuotaModal, setShowQuotaModal] = useState<boolean>(false)
-  const [quotaAction, setQuotaAction] = useState<'analyze' | 'classify' | null>(
-    null
+  const [quotaAction, setQuotaAction] = useState<
+    'analyze' | 'classify' | 'queue' | null
+  >(null)
+  const [aiErrorMessage, setAiErrorMessage] = useState<string>(
+    'Serviço de IA indisponível no momento.'
   )
 
   // Sync dark class with document element for tailwind dark: selectors
@@ -221,82 +259,67 @@ export default function App() {
     }
   }, [isDarkMode])
 
-  // Real-time queue polling & fetch effect
   useEffect(() => {
-    let interval: ReturnType<typeof setInterval> | undefined
-    if (step === 8) {
-      fetchQueueList()
-      interval = setInterval(() => {
-        fetchQueueList()
-      }, 5000)
+    const protectDraft = (event: BeforeUnloadEvent) => {
+      if (!patient.name && !symptoms.text && !sessionId) return
+      event.preventDefault()
     }
-    return () => {
-      if (interval) clearInterval(interval)
-    }
-  }, [step])
+    window.addEventListener('beforeunload', protectDraft)
+    return () => window.removeEventListener('beforeunload', protectDraft)
+  }, [patient.name, sessionId, symptoms.text])
 
-  const fetchQueueList = async () => {
-    try {
-      const response = await fetch('/api/triage/queue')
-      if (response.ok) {
-        const data = await response.json()
-        setQueueList(data.queue)
-
-        // Re-align our myQueueItem from the list if matches by name
-        if (patient.name) {
-          const matched = data.queue.find(
-            (p: QueuePatient) =>
-              p.name.toLowerCase() === patient.name.toLowerCase()
-          )
-          if (matched) {
-            setMyQueueItem(matched)
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('Rede instável ao carregar painel eletrônico:', err)
+  useEffect(() => {
+    if (queueQuery.error) {
+      console.warn(
+        'Rede instável ao carregar painel eletrônico:',
+        queueQuery.error
+      )
     }
-  }
+  }, [queueQuery.error])
 
   const submitToTriageQueue = async (clinicalResult: ClassificarResponse) => {
-    setIsLoadingQueue(true)
     try {
-      const response = await fetch('/api/triage/queue/submit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: patient.name || 'Paciente Triado',
-          age: patient.age,
-          color: clinicalResult.classificacao.nivel,
-          title: MANCHESTER[clinicalResult.classificacao.nivel].rotulo
-        })
+      const payload = TriagemFilaSubmitRequestSchema.parse({
+        sessao: {
+          sessaoId: sessionId,
+          paciente: {
+            nome: patient.name,
+            idade: patient.age,
+            sexoBiologico:
+              patient.sex === 'male'
+                ? 'masculino'
+                : patient.sex === 'female'
+                  ? 'feminino'
+                  : undefined,
+            consentimentoLGPD: hasConsent
+          },
+          relato: { texto: symptoms.text, origem: 'texto' },
+          sintomasIdentificados: detectedSymptoms,
+          redFlags: collectorRedFlags,
+          perguntas: adaptiveQuestions,
+          respostas: answers,
+          nivelDor: painLevel,
+          sinaisVitais: buildVitalsPayload(),
+          alertaEmergencia: emergencyAlert || undefined,
+          versaoModeloColetor: collectorModelVersion,
+          resultado: clinicalResult
+        }
       })
-      if (response.ok) {
-        const data = await response.json()
-        setQueueList(data.queue)
-        setMyQueueItem(data.patient)
-        triggerToast('🚀 Dados transmitidos para a Enfermagem & Recepção!')
-      }
+      await submitQueueMutation.mutateAsync(payload)
+      setStep(8)
+      triggerToast('🚀 Dados transmitidos para a Enfermagem & Recepção!')
     } catch (err) {
       console.error('Erro no envio para recepção:', err)
-    } finally {
-      setIsLoadingQueue(false)
+      setAiErrorMessage(
+        err instanceof Error ? err.message : 'Não foi possível transmitir a ficha.'
+      )
+      setQuotaAction('queue')
+      setShowQuotaModal(true)
     }
   }
 
-  const simulateQueueAdvance = async () => {
-    try {
-      const response = await fetch('/api/triage/queue/advance', {
-        method: 'POST'
-      })
-      if (response.ok) {
-        const data = await response.json()
-        setQueueList(data.queue)
-        triggerToast('🔊 Chamada eletrônica: Fila atualizada!')
-      }
-    } catch (err) {
-      console.error('Erro ao simular avanço da fila:', err)
-    }
+  const simulateQueueAdvance = () => {
+    triggerToast('A fila é atualizada automaticamente a cada 5 segundos.')
   }
 
   const getManchesterColorClass = (color: string) => {
@@ -325,16 +348,15 @@ export default function App() {
     return parts[0] + ' ' + parts[parts.length - 1][0] + '***'
   }
 
-  // Speech simulation timer
+  // Contador de gravação (apenas exibição). Cap de segurança em 120s.
   useEffect(() => {
     let interval: ReturnType<typeof setInterval> | undefined
     if (isRecording) {
       interval = setInterval(() => {
         setRecordingSeconds(prev => {
-          if (prev >= 15) {
-            // Stop automatically after 15 seconds for realistic feedback
+          if (prev >= 120) {
             handleStopRecording()
-            return 0
+            return prev
           }
           return prev + 1
         })
@@ -357,66 +379,95 @@ export default function App() {
     setCustomToast(message)
   }
 
-  // Preset complaints to let patients explore various paths easily
-  const complaintsPresets = [
-    {
-      title: '🫀 Pressão no peito e suor',
-      text: 'Estou com uma dor forte no peito, parece um aperto, e estou suando um pouco frio.',
-      badge: 'Sintoma Coronariano'
-    },
-    {
-      title: '🤢 Febre e dor abdominal',
-      text: 'Sinto uma cólica forte na barriga que começou ontem à noite, com febre e enjoo.',
-      badge: 'Sintoma Abdominal'
-    },
-    {
-      title: '⚡ Dor de cabeça súbita',
-      text: 'Eu estou com uma dor de cabeça insuportável na nuca que começou de repente, é a pior dor da minha vida.',
-      badge: 'Sintoma Neurológico'
-    },
-    {
-      title: '🌡️ Febre e indisposição leve',
-      text: 'Fiquei gripado com corpo dolorido e sinto uma febre baixa que vai e volta.',
-      badge: 'Sintoma Respiratório Comum'
-    }
-  ]
-
-  const selectPreset = (text: string) => {
-    setSymptoms({ text, audioLogged: false })
-    setAudioTranscript('')
-    setHasRecordedAudio(false)
-    triggerToast('Queixa selecionada! Agora continue para a análise de IA.')
+  const stopMediaStream = () => {
+    mediaStreamRef.current?.getTracks().forEach(track => track.stop())
+    mediaStreamRef.current = null
   }
 
-  const startVoiceRecording = () => {
-    setIsRecording(true)
-    setSymptoms(prev => ({ ...prev, text: '' }))
-    setHasRecordedAudio(false)
-    setAudioTranscript('')
+  const finalizeRecording = async () => {
+    stopMediaStream()
+    const chunks = audioChunksRef.current
+    audioChunksRef.current = []
+    if (chunks.length === 0) {
+      triggerToast('Nenhum áudio capturado. Use o campo de texto.')
+      return
+    }
+    setIsTranscribing(true)
+    try {
+      const blob = new Blob(chunks, { type: chunks[0].type || 'audio/webm' })
+      const audioBase64 = await blobToWavBase64(blob)
+      const result = await transcribeMutation.mutateAsync({
+        audioBase64,
+        formato: 'wav'
+      })
+      const texto = result.texto.trim()
+      if (!texto) {
+        triggerToast('Não consegui entender o áudio. Tente novamente ou digite.')
+        return
+      }
+      setAudioTranscript(texto)
+      setHasRecordedAudio(true)
+      setSymptoms(prev => ({
+        text: prev.text ? `${prev.text} ${texto}`.trim() : texto,
+        audioLogged: true
+      }))
+      triggerToast('Transcrição pronta — revise e edite se precisar.')
+    } catch (error) {
+      triggerToast(
+        error instanceof Error
+          ? error.message
+          : 'Falha na transcrição. Use o campo de texto.'
+      )
+    } finally {
+      setIsTranscribing(false)
+    }
+  }
+
+  const startVoiceRecording = async () => {
+    if (
+      !navigator.mediaDevices?.getUserMedia ||
+      typeof MediaRecorder === 'undefined'
+    ) {
+      triggerToast('Gravação por voz não suportada aqui. Use o campo de texto.')
+      return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      mediaStreamRef.current = stream
+      audioChunksRef.current = []
+      const recorder = new MediaRecorder(stream)
+      recorder.ondataavailable = event => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data)
+      }
+      recorder.onstop = () => {
+        void finalizeRecording()
+      }
+      mediaRecorderRef.current = recorder
+      setAudioTranscript('')
+      setHasRecordedAudio(false)
+      recorder.start()
+      setIsRecording(true)
+    } catch {
+      stopMediaStream()
+      triggerToast('Não foi possível acessar o microfone. Use o campo de texto.')
+    }
   }
 
   const handleStopRecording = () => {
+    const recorder = mediaRecorderRef.current
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.stop() // dispara onstop -> finalizeRecording
+    } else {
+      stopMediaStream()
+    }
     setIsRecording(false)
-    setHasRecordedAudio(true)
-    // Simulate smart transcribing depending on user intent or use a default realistic one
-    const randomTranscripts = [
-      'Estou sentindo uma dor forte no peito que parece estar espalhando pelo braço, sinto falta de ar também.',
-      'Tive vômito hoje de manhã e agora estou com uma dor aguda na parte direita da barriga.',
-      'Dor de cabeça insuportável na nuca que começou de repente.',
-      'Garganta inflamada há três dias, com febre e um pouco de tosse seca.'
-    ]
-    // pick one corresponding to preset or standard
-    const matchedText =
-      randomTranscripts[Math.floor(Math.random() * randomTranscripts.length)]
-    setAudioTranscript(matchedText)
-    setSymptoms({
-      text: matchedText,
-      audioLogged: true
-    })
-    triggerToast('🎙️ Áudio convertido em texto pela nossa IA com sucesso!')
   }
 
   const handleRestartRecording = () => {
+    const recorder = mediaRecorderRef.current
+    if (recorder && recorder.state !== 'inactive') recorder.stop()
+    stopMediaStream()
+    audioChunksRef.current = []
     setRecordingSeconds(0)
     setAudioTranscript('')
     setHasRecordedAudio(false)
@@ -425,10 +476,7 @@ export default function App() {
   }
 
   const togglePlayAudio = () => {
-    setIsPlayingAudio(!isPlayingAudio)
-    if (!isPlayingAudio) {
-      setTimeout(() => setIsPlayingAudio(false), 3000)
-    }
+    triggerToast('Reprodução indisponível sem uma gravação real.')
   }
 
   // Call the analytical AI API
@@ -441,248 +489,144 @@ export default function App() {
       return
     }
 
-    setIsAnalyzing(true)
     setStep(3) // transition step
 
     try {
-      console.log('Submitting to triage/analyze with payload:', {
-        symptomText: finalQuery,
-        patientAge: patient.age,
-        patientSex: patient.sex
+      const payload = AnalisarRelatoRequestSchema.parse({
+        paciente: {
+          nome: patient.name,
+          idade: patient.age,
+          sexoBiologico:
+            patient.sex === 'male'
+              ? 'masculino'
+              : patient.sex === 'female'
+                ? 'feminino'
+                : undefined,
+          consentimentoLGPD: hasConsent
+        },
+        relato: {
+          texto: finalQuery,
+          origem: 'texto'
+        }
       })
-      const response = await fetch('/api/triage/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          symptomText: finalQuery,
-          patientAge: patient.age,
-          patientSex: patient.sex
-        })
-      })
-
-      if (response.status === 429) {
-        throw new Error('QUOTA_EXCEEDED')
-      }
-
-      if (response.ok) {
-        const data = await response.json()
-        setDetectedSymptoms(data.sintomasIdentificados || [])
-        setAdaptiveQuestions(data.perguntas || [])
-
-        // Initialize blank answers according to RespostaAdaptativa structure
-        const initialAnswers = (data.perguntas || []).map(
-          (q: PerguntaAdaptativa) => {
-            let defaultValue: any = ''
-            if (q.tipo === 'sim_nao') defaultValue = null // Unanswered boolean
-            if (q.tipo === 'multipla_escolha') defaultValue = []
-            if (q.tipo === 'escala') defaultValue = q.escala?.min || 0
-            return {
-              perguntaId: q.id,
-              tipo: q.tipo,
-              valor: defaultValue
-            } as RespostaAdaptativa
-          }
-        )
-        setAnswers(initialAnswers)
-
-        setTimeout(() => {
-          setIsAnalyzing(false)
-          setStep(4)
-        }, 1500)
-      } else {
-        throw new Error('Erro na rede do servidor')
-      }
-    } catch (e: any) {
-      if (e.message === 'QUOTA_EXCEEDED') {
-        setShowQuotaModal(true)
-        setQuotaAction('analyze')
-        setIsAnalyzing(false)
-        return // Halt progression
-      }
-      executeAnalyzeFallback()
+      const data = await analyzeMutation.mutateAsync(payload)
+      setSessionId(data.sessaoId)
+      setDetectedSymptoms(data.sintomasIdentificados)
+      setCollectorRedFlags(data.redFlags)
+      setAdaptiveQuestions(data.perguntas)
+      setAnswers([])
+      setEmergencyAlert(data.alertaEmergencia || null)
+      setCollectorModelVersion(data.versaoModelo)
+      setStep(4)
+    } catch (error) {
+      setAiErrorMessage(
+        error instanceof Error
+          ? error.message
+          : 'Serviço de IA indisponível no momento.'
+      )
+      setQuotaAction('analyze')
+      setShowQuotaModal(true)
+      setStep(2)
     }
   }
 
-  const executeAnalyzeFallback = () => {
-    console.warn('Fallback offline local ativado.')
-    setDetectedSymptoms([{ rotulo: 'dor descrita pelo paciente' }])
-    const mockPerguntas: PerguntaAdaptativa[] = [
-      {
-        id: 'fallback_1',
-        pergunta: 'Você está com suor frio ou tontura nesse momento?',
-        tipo: 'sim_nao',
-        obrigatoria: true
-      },
-      {
-        id: 'fallback_2',
-        pergunta: 'A intensidade dessa queixa começou de repente?',
-        tipo: 'sim_nao',
-        obrigatoria: true
-      },
-      {
-        id: 'fallback_3',
-        pergunta:
-          'De 0 a 10, sendo 10 a dor mais insuportável que já sentiu, como classifica a dor atual?',
-        tipo: 'escala',
-        escala: { min: 0, max: 10 },
-        obrigatoria: true
-      }
-    ]
-    setAdaptiveQuestions(mockPerguntas)
-    setAnswers(
-      mockPerguntas.map(
-        q =>
-          ({
-            perguntaId: q.id,
-            tipo: q.tipo,
-            valor: q.tipo === 'sim_nao' ? null : q.tipo === 'escala' ? 0 : ''
-          }) as RespostaAdaptativa
-      )
-    )
-    setTimeout(() => {
-      setIsAnalyzing(false)
-      setStep(4)
-    }, 1500)
+  const buildVitalsPayload = (): SinaisVitais | undefined => {
+    const pressure = vitals.bloodPressure
+      ? vitals.bloodPressure.split(/[/x]/).map(value => parseInt(value))
+      : []
+    const payload: SinaisVitais = {}
+    if (vitals.temperature)
+      payload.temperaturaC = parseFloat(vitals.temperature.replace(',', '.'))
+    if (vitals.heartRate)
+      payload.freqCardiacaBpm = parseInt(vitals.heartRate)
+    if (pressure.length === 2 && pressure.every(Number.isFinite)) {
+      payload.pressaoSistolica = pressure[0]
+      payload.pressaoDiastolica = pressure[1]
+    }
+    if (vitals.saturation) payload.spo2 = parseInt(vitals.saturation)
+    return Object.keys(payload).length > 0 ? payload : undefined
+  }
+
+  const resolvePainLevel = (): number | undefined => {
+    const painAnswer = answers.find(answer => {
+      const question = adaptiveQuestions.find(q => q.id === answer.perguntaId)
+      return answer.tipo === 'escala' && /dor|intensidade/i.test(question?.pergunta || '')
+    })
+    return painAnswer?.tipo === 'escala' ? painAnswer.valor : painLevel
   }
 
   // Call the classification API
   const classifyTriageLevel = async () => {
-    setIsClassifying(true)
+    const missingRequired = adaptiveQuestions.filter(
+      question =>
+        question.obrigatoria &&
+        !isRespostaPreenchida(
+          question,
+          answers.find(answer => answer.perguntaId === question.id)
+        )
+    )
+    if (missingRequired.length > 0) {
+      triggerToast(
+        `Responda as ${missingRequired.length} pergunta(s) obrigatória(s) antes de continuar.`
+      )
+      setStep(4)
+      return
+    }
+
     setStep(7) // Jump straight to results wait
 
-    const painLabels = [
-      'Sem dor',
-      'Muito leve',
-      'Suave',
-      'Desconfortável',
-      'Incomoda',
-      'Chata',
-      'Moderadamente forte',
-      'Forte',
-      'Muito intensa',
-      'Insuportável',
-      'Pior dor do mundo'
-    ]
-
-    const payload = {
-      sessaoId: 'sessao-' + Date.now(),
-      paciente: {
-        nome: patient.name,
-        idade: patient.age,
-        sexo: patient.sex,
-        consentimentoLGPD: hasConsent
-      },
-      relato: {
-        texto: symptoms.text,
-        origem: symptoms.audioLogged ? 'audio' : 'texto'
-      },
-      sintomasIdentificados: detectedSymptoms,
-      respostas: answers
-        .filter(a => a.valor !== null && a.valor !== '')
-        .map(a => {
-          const q = adaptiveQuestions.find(aq => aq.id === a.perguntaId)
-          let humanValue = a.valor
-          if (a.tipo === 'sim_nao') humanValue = a.valor ? 'Sim' : 'Não'
-          if (a.tipo === 'escolha_unica')
-            humanValue =
-              q?.opcoes?.find(o => o.valor === a.valor)?.rotulo || a.valor
-          if (a.tipo === 'multipla_escolha')
-            humanValue = (a.valor as string[])
-              .map(v => q?.opcoes?.find(o => o.valor === v)?.rotulo || v)
-              .join(', ')
-
-          return {
-            ...a,
-            questionText: q?.pergunta || 'Pergunta',
-            answer: humanValue?.toString() || ''
-          }
-        }),
-      sinaisVitais: {
-        temperaturaC: vitals.temperature
-          ? parseFloat(vitals.temperature.replace(',', '.'))
-          : null,
-        freqCardiacaBpm: vitals.heartRate ? parseInt(vitals.heartRate) : null,
-        pressaoSistolica: (() => {
-          if (!vitals.bloodPressure) return null
-          const p = vitals.bloodPressure.split(/[/x]/)
-          return p[0] ? parseInt(p[0]) : null
-        })(),
-        pressaoDiastolica: (() => {
-          if (!vitals.bloodPressure) return null
-          const p = vitals.bloodPressure.split(/[/x]/)
-          return p[1] ? parseInt(p[1]) : null
-        })(),
-        spo2: vitals.saturation ? parseInt(vitals.saturation) : null
-      }
-    }
-
     try {
-      const response = await fetch('/api/triage/classify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+      const payload = ClassificarRequestSchema.parse({
+        sessaoId: sessionId,
+        paciente: {
+          nome: patient.name,
+          idade: patient.age,
+          sexoBiologico:
+            patient.sex === 'male'
+              ? 'masculino'
+              : patient.sex === 'female'
+                ? 'feminino'
+                : undefined,
+          consentimentoLGPD: hasConsent
+        },
+        relato: { texto: symptoms.text, origem: 'texto' },
+        sintomasIdentificados: detectedSymptoms,
+        redFlagsColetor: collectorRedFlags,
+        perguntas: adaptiveQuestions,
+        respostas: answers,
+        nivelDor: resolvePainLevel(),
+        sinaisVitais: buildVitalsPayload(),
+        versaoModeloColetor: collectorModelVersion
       })
-
-      if (response.status === 429) {
-        throw new Error('QUOTA_EXCEEDED')
-      }
-
-      if (response.ok) {
-        const data = await response.json()
-        setResult(data)
-        await submitToTriageQueue(data)
-        setIsClassifying(false)
-        setStep(7) // Keep classification view first
-      } else {
-        throw new Error('Erro na geração de diagnóstico pela IA')
-      }
-    } catch (err: any) {
-      if (err.message === 'QUOTA_EXCEEDED') {
-        setShowQuotaModal(true)
-        setQuotaAction('classify')
-        setIsClassifying(false)
-        return // Halt progression
-      }
-      await executeClassifyFallback()
-    }
-  }
-
-  const executeClassifyFallback = async () => {
-    // Local premium rule-based fallback
-    const fallbackResult: ClassificarResponse = {
-      sessaoId: 'local-' + Date.now(),
-      classificacao: {
-        nivel: 'laranja',
-        confianca: 0.95,
-        justificativa:
-          'Alta prioridade diagnóstica. Nossa equipe receberá seu histórico imediatamente por segurança.',
-        fatoresDeterminantes: ['Sistema de triagem offline']
-      },
-      esperaEstimada: { min: 0, max: 10, unidade: 'min' },
-      recomendacoes: [
-        'Fale na recepção que seu aplicativo indicou cor Laranja.',
-        'Evite ingerir líquidos ou alimentos até falar com o médico.',
-        'Mantenha repouso absoluto na sala de espera.'
-      ],
-      redFlags: [],
-      emergencia: false,
-      disclaimer: 'Gerado por motor local.',
-      geradoEm: new Date().toISOString(),
-      versaoModelo: 'Local'
-    }
-
-    setResult(fallbackResult)
-    await submitToTriageQueue(fallbackResult as any)
-    setIsClassifying(false)
-    setStep(7)
-  }
-
-  const handleAnswerSelect = (qId: string, value: any) => {
-    setAnswers(prev =>
-      prev.map(item =>
-        item.perguntaId === qId ? { ...item, valor: value } : item
+      const data = await classifyMutation.mutateAsync(payload)
+      setResult(data)
+    } catch (error) {
+      setAiErrorMessage(
+        error instanceof Error
+          ? error.message
+          : 'Serviço de IA indisponível no momento.'
       )
-    )
+      setQuotaAction('classify')
+      setShowQuotaModal(true)
+      setStep(6)
+    }
+  }
+
+  const handleAnswerSelect = (
+    qId: string,
+    value: boolean | string | string[] | number
+  ) => {
+    const question = adaptiveQuestions.find(item => item.id === qId)
+    if (!question) return
+    const answer = {
+      perguntaId: qId,
+      tipo: question.tipo,
+      valor: value
+    } as RespostaAdaptativa
+    setAnswers(prev => [
+      ...prev.filter(item => item.perguntaId !== qId),
+      answer
+    ])
   }
 
   // Pain indicator description resolver
@@ -782,21 +726,36 @@ export default function App() {
 
   // Reset the entire questionnaire for testing again
   const handleResetApp = () => {
+    if (
+      (patient.name || symptoms.text || sessionId) &&
+      !window.confirm(
+        'Recomeçar apagará os dados desta pré-triagem. Deseja continuar?'
+      )
+    ) {
+      return
+    }
     setStep(1)
+    setPatient({ name: '', age: 41, sex: '' })
+    setAgeConfirmed(false)
+    setHasConsent(false)
     setSymptoms({ text: '', audioLogged: false })
     setAudioTranscript('')
     setHasRecordedAudio(false)
     setAnswers([])
     setDetectedSymptoms([])
-    setPainLevel(5)
+    setSessionId('')
+    setCollectorRedFlags([])
+    setEmergencyAlert(null)
+    setCollectorModelVersion('')
+    setPainLevel(undefined)
     setVitals({
-      temperature: '37.2',
-      heartRate: '96',
+      temperature: '',
+      heartRate: '',
       bloodPressure: '',
       saturation: ''
     })
     setResult(null)
-    setMyQueueItem(null)
+    setAppointmentConfirmed(false)
     triggerToast('Iniciando nova triagem limpa!')
   }
 
@@ -824,32 +783,34 @@ export default function App() {
               <AlertTriangle className="w-7 h-7" />
             </div>
             <h3 className="text-xl font-bold text-center text-slate-800 dark:text-white">
-              Limite Diário Atingido
+              Serviço de IA Indisponível
             </h3>
             <p className="text-center text-sm text-slate-500 dark:text-slate-400">
-              O modelo de Inteligência Artificial atingiu sua cota de uso neste
-              momento. Mas não se preocupe! Podemos continuar sua triagem com
-              nosso sistema clínico offline de alta precisão.
+              {aiErrorMessage} Nenhuma pergunta ou classificação foi criada
+              localmente. Seus dados continuam preenchidos para uma nova
+              tentativa.
             </p>
             <div className="flex flex-col gap-2 pt-2">
               <button
                 onClick={() => {
                   setShowQuotaModal(false)
                   if (quotaAction === 'analyze') {
-                    executeAnalyzeFallback()
+                    void analyzeSymptomsWithAI()
                   } else if (quotaAction === 'classify') {
-                    executeClassifyFallback()
+                    void classifyTriageLevel()
+                  } else if (quotaAction === 'queue' && result) {
+                    void submitToTriageQueue(result)
                   }
                 }}
                 className="w-full btn btn-primary text-primary-content h-12 rounded-xl text-sm font-bold cursor-pointer"
               >
-                Continuar com Triagem Offline
+                Tentar Novamente
               </button>
               <button
                 onClick={() => setShowQuotaModal(false)}
                 className="w-full btn btn-ghost text-base-content h-12 rounded-xl text-sm font-bold cursor-pointer"
               >
-                Aguardar
+                Voltar para Editar
               </button>
             </div>
           </div>
@@ -934,7 +895,9 @@ export default function App() {
                   </label>
                   <input
                     id="patient_name"
+                    name="patientName"
                     type="text"
+                    autoComplete="name"
                     value={patient.name}
                     onChange={e =>
                       setPatient(prev => ({ ...prev, name: e.target.value }))
@@ -955,10 +918,13 @@ export default function App() {
                       id="decrement_age"
                       type="button"
                       onClick={() =>
-                        setPatient(prev => ({
-                          ...prev,
-                          age: Math.max(1, prev.age - 1)
-                        }))
+                        setPatient(prev => {
+                          setAgeConfirmed(true)
+                          return {
+                            ...prev,
+                            age: Math.max(1, prev.age - 1)
+                          }
+                        })
                       }
                       className="w-12 h-12 bg-base-300 text-base-content hover:opacity-80 rounded-full flex items-center justify-center font-bold text-xl transition select-none cursor-pointer"
                     >
@@ -981,10 +947,13 @@ export default function App() {
                       id="increment_age"
                       type="button"
                       onClick={() =>
-                        setPatient(prev => ({
-                          ...prev,
-                          age: Math.min(125, prev.age + 1)
-                        }))
+                        setPatient(prev => {
+                          setAgeConfirmed(true)
+                          return {
+                            ...prev,
+                            age: Math.min(125, prev.age + 1)
+                          }
+                        })
                       }
                       className="w-12 h-12 bg-base-300 text-base-content hover:opacity-80 rounded-full flex items-center justify-center font-bold text-xl transition select-none cursor-pointer"
                     >
@@ -996,15 +965,19 @@ export default function App() {
                   <div className="mt-4 px-2">
                     <input
                       id="age_range_slider"
+                      name="patientAge"
                       type="range"
                       min="1"
                       max="125"
                       value={patient.age}
                       onChange={e =>
-                        setPatient(prev => ({
-                          ...prev,
-                          age: parseInt(e.target.value) || 1
-                        }))
+                        setPatient(prev => {
+                          setAgeConfirmed(true)
+                          return {
+                            ...prev,
+                            age: parseInt(e.target.value) || 1
+                          }
+                        })
                       }
                       className="range range-primary range-sm w-full"
                     />
@@ -1072,7 +1045,7 @@ export default function App() {
                 <button
                   id="btn_step_1_continue"
                   type="button"
-                  disabled={!patient.name.trim() || !hasConsent}
+                  disabled={!patient.name.trim() || !hasConsent || !ageConfirmed}
                   onClick={() => setStep(2)}
                   className="w-full btn btn-primary text-primary-content h-14 rounded-2xl font-bold text-lg transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-40"
                 >
@@ -1108,7 +1081,7 @@ export default function App() {
               {/* Mode Selector Panel (Foco Inclusivo) */}
               <div className="space-y-4">
                 {/* Visual Option Box: VOICE RECORDING (Destaque Proeminente por Inclusão) */}
-                {!hasRecordedAudio && !isRecording && (
+                {!hasRecordedAudio && !isRecording && !isTranscribing && (
                   <button
                     onClick={startVoiceRecording}
                     id="btn_mode_audio"
@@ -1186,6 +1159,22 @@ export default function App() {
                   </div>
                 )}
 
+                {/* TRANSCRIBING (Qwen-Audio ASR) */}
+                {isTranscribing && (
+                  <div
+                    id="transcribing_panel"
+                    className="p-6 bg-base-200 border-2 border-base-300 rounded-3xl flex flex-col items-center space-y-3"
+                  >
+                    <span className="loading loading-dots loading-md text-primary"></span>
+                    <p className="text-sm font-bold text-base-content">
+                      Transcrevendo seu áudio com a IA...
+                    </p>
+                    <p className="text-xs text-center text-slate-500 dark:text-slate-400">
+                      Você poderá revisar e editar o texto antes de continuar.
+                    </p>
+                  </div>
+                )}
+
                 {/* COMPLETED RECORDING WITH OPTIONS */}
                 {hasRecordedAudio && !isRecording && (
                   <div className="p-5 bg-base-200 border border-base-300 rounded-2xl space-y-4">
@@ -1221,7 +1210,7 @@ export default function App() {
                             : 'Ouvir gravação original'}
                         </div>
                         <div className="text-xs text-slate-500">
-                          Áudio simulado • 12 segundos
+                          Recurso de voz aguardando integração real
                         </div>
                       </div>
                     </div>
@@ -1257,6 +1246,8 @@ export default function App() {
 
                     <textarea
                       id="symptoms_textarea"
+                      name="symptomReport"
+                      autoComplete="off"
                       rows={3}
                       value={symptoms.text}
                       onChange={e => {
@@ -1379,6 +1370,19 @@ export default function App() {
                   o hospital a entender a gravidade imediata.
                 </p>
               </div>
+
+              {emergencyAlert && (
+                <div className="alert alert-error rounded-2xl" role="alert">
+                  <AlertTriangle className="w-5 h-5" />
+                  <div>
+                    <h3 className="font-black">{emergencyAlert.motivo}</h3>
+                    <p className="text-xs">{emergencyAlert.acao}</p>
+                  </div>
+                  <a href="tel:192" className="btn btn-sm">
+                    Ligar 192
+                  </a>
+                </div>
+              )}
 
               {/* Clean Reusable "Cartão de Pergunta" Container */}
               <div className="space-y-5" id="adaptive_questions_list">
@@ -1602,7 +1606,25 @@ export default function App() {
 
                 <button
                   type="button"
-                  onClick={() => setStep(5)}
+                  onClick={() => {
+                    const missing = adaptiveQuestions.filter(
+                      question =>
+                        question.obrigatoria &&
+                        !isRespostaPreenchida(
+                          question,
+                          answers.find(
+                            answer => answer.perguntaId === question.id
+                          )
+                        )
+                    )
+                    if (missing.length > 0) {
+                      triggerToast(
+                        `Responda as ${missing.length} pergunta(s) obrigatória(s).`
+                      )
+                      return
+                    }
+                    setStep(5)
+                  }}
                   className="flex-1 btn btn-primary h-14 text-primary-content rounded-2xl font-bold text-lg transition flex items-center justify-center gap-1 cursor-pointer"
                 >
                   Continuar
@@ -1664,7 +1686,9 @@ export default function App() {
                       <div className="flex items-center justify-between gap-1.5 border-b border-base-300 pb-2">
                         <input
                           id="vital_temp"
-                          type="text"
+                          name="temperature"
+                          type="number"
+                          inputMode="decimal"
                           value={vitals.temperature}
                           onChange={e =>
                             setVitals(prev => ({
@@ -1715,7 +1739,9 @@ export default function App() {
                       <div className="flex items-center justify-between gap-1.5 border-b border-base-300 pb-2">
                         <input
                           id="vital_heart"
-                          type="text"
+                          name="heartRate"
+                          type="number"
+                          inputMode="numeric"
                           value={vitals.heartRate}
                           onChange={e =>
                             setVitals(prev => ({
@@ -1772,7 +1798,9 @@ export default function App() {
                             <div className="flex items-center justify-between gap-1.5 border-b border-base-300 pb-2">
                               <input
                                 id="vital_bp"
+                                name="bloodPressure"
                                 type="text"
+                                inputMode="numeric"
                                 value={vitals.bloodPressure}
                                 onChange={e =>
                                   setVitals(prev => ({
@@ -1868,7 +1896,9 @@ export default function App() {
                       <div className="flex items-center justify-between gap-1.5 border-b border-base-300 pb-2">
                         <input
                           id="vital_sat"
-                          type="text"
+                          name="oxygenSaturation"
+                          type="number"
+                          inputMode="numeric"
                           value={vitals.saturation}
                           onChange={e =>
                             setVitals(prev => ({
@@ -2012,16 +2042,28 @@ export default function App() {
                         const val = (answer as any).valor
 
                         if (answer.tipo === 'sim_nao') {
-                          displayValue = val ? 'Sim' : 'Não'
+                          displayValue =
+                            typeof val === 'boolean'
+                              ? val
+                                ? 'Sim'
+                                : 'Não'
+                              : 'Não respondido'
                         } else if (answer.tipo === 'escolha_unica') {
-                          const op = q?.opcoes?.find(o => o.valor === val)
+                          const op =
+                            q && 'opcoes' in q
+                              ? q.opcoes.find(o => o.valor === val)
+                              : undefined
                           displayValue = op ? op.rotulo : val
                         } else if (answer.tipo === 'multipla_escolha') {
                           displayValue =
-                            q?.opcoes
-                              ?.filter(o => (val as string[]).includes(o.valor))
-                              .map(o => o.rotulo)
-                              .join(', ') || ''
+                            q && 'opcoes' in q
+                              ? q.opcoes
+                                  .filter(o =>
+                                    (val as string[]).includes(o.valor)
+                                  )
+                                  .map(o => o.rotulo)
+                                  .join(', ')
+                              : ''
                         } else if (answer.tipo === 'escala') {
                           displayValue = val.toString()
                         }
@@ -2218,7 +2260,7 @@ export default function App() {
                                 .substring(alertaTexto.length)
                                 .trim()
                             } else {
-                              // Fallback sentence-based splitter
+                              // Sentence-based splitter for older model wording.
                               const sentences = cleanedText.split('.')
                               if (sentences.length > 2) {
                                 alertaTexto =
@@ -2315,19 +2357,99 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* Suggested appointment — human-in-the-loop checkpoint */}
+                  {result.agendamento ? (
+                    <div className="pt-4 border-t border-base-300 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
+                        <h3 className="text-xs font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">
+                          Encaixe sugerido pelo agente
+                        </h3>
+                      </div>
+                      <div
+                        id="suggested_appointment"
+                        className={`bg-base-200 border border-l-4 ${
+                          appointmentConfirmed
+                            ? 'border-success'
+                            : 'border-primary'
+                        } p-4.5 rounded-2xl space-y-3 transition-all`}
+                      >
+                        <div className="flex items-start gap-3.5">
+                          <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                            <CalendarClock className="w-5 h-5" />
+                          </div>
+                          <div className="flex-1 space-y-1.5">
+                            <p className="text-sm font-black text-base-content/95 capitalize">
+                              {result.agendamento.especialidade}
+                            </p>
+                            <p className="text-xs font-bold text-base-content/70 flex items-center gap-1.5">
+                              <MapPin className="w-3.5 h-3.5 shrink-0" />
+                              {result.agendamento.local}
+                            </p>
+                            <p className="text-xs font-bold text-base-content/70 flex items-center gap-1.5">
+                              <CalendarClock className="w-3.5 h-3.5 shrink-0" />
+                              {new Date(
+                                result.agendamento.proximoSlot
+                              ).toLocaleString('pt-BR', {
+                                day: '2-digit',
+                                month: '2-digit',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </p>
+                          </div>
+                        </div>
+                        {appointmentConfirmed ? (
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-xs font-black text-success flex items-center gap-1.5">
+                              <CheckCircle className="w-4 h-4" /> Encaixe
+                              confirmado por você
+                            </span>
+                            <button
+                              onClick={() => setAppointmentConfirmed(false)}
+                              className="btn btn-ghost btn-sm font-bold text-xs flex items-center gap-1.5"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" /> Ajustar
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <button
+                              onClick={() => {
+                                setAppointmentConfirmed(true)
+                                triggerToast('Encaixe confirmado.')
+                              }}
+                              className="w-full btn btn-primary text-primary-content font-extrabold h-12 rounded-2xl text-sm flex items-center justify-center gap-2"
+                            >
+                              <CheckCircle className="w-4 h-4" /> Confirmar este
+                              encaixe
+                            </button>
+                            <p className="text-[10px] text-center text-slate-400 dark:text-slate-500 leading-relaxed">
+                              Sugestão preliminar. A equipe de triagem confirma o
+                              horário final presencialmente.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+
                   {/* Patient care interactive buttons */}
                   <div className="pt-4 border-t border-base-300 space-y-3">
                     <button
                       onClick={() => {
                         if (result) {
-                          setStep(8)
+                          void submitToTriageQueue(result)
                         }
                       }}
+                      disabled={isLoadingQueue}
                       className="w-full btn btn-primary text-primary-content font-extrabold h-16 rounded-2xl text-[14px] transition flex flex-col items-center justify-center py-2 shrink-0 cursor-pointer shadow-md relative overflow-hidden group hover:opacity-95"
                     >
                       <span className="flex items-center gap-2 font-black tracking-wide uppercase">
                         <Activity className="w-4.5 h-4.5 text-current animate-pulse" />
-                        Ir Para a Fila de Triagem & Acompanhar Atendimento
+                        {isLoadingQueue
+                          ? 'Transmitindo Ficha...'
+                          : 'Ir Para a Fila de Triagem & Acompanhar Atendimento'}
                       </span>
                       <span className="text-[10px] font-bold opacity-85 uppercase tracking-wider block mt-0.5">
                         Transmite seus dados para a Enfermagem e abre o Painel
@@ -2356,11 +2478,8 @@ export default function App() {
                         Nova Triagem
                       </button>
                       <button
-                        onClick={() =>
-                          triggerToast(
-                            'ℹ️ Os dados foram salvos de forma privada no celular.'
-                          )
-                        }
+                        disabled
+                        title="Histórico indisponível até existir persistência real"
                         className="btn bg-primary hover:opacity-90 border-none text-primary-content font-extrabold h-14 rounded-2xl flex items-center justify-center gap-2 transition-all text-sm cursor-pointer shadow-sm"
                       >
                         <FileText className="w-4 h-4 text-current" />
@@ -2593,6 +2712,8 @@ export default function App() {
                       <button
                         onClick={simulateQueueAdvance}
                         type="button"
+                        disabled
+                        title="A fila é atualizada automaticamente"
                         className="btn btn-xs bg-primary hover:opacity-90 border-none text-primary-content font-bold px-3 py-1.5 h-auto min-h-0 rounded-lg cursor-pointer transition flex items-center gap-1.5 shadow-sm text-[11px] self-start sm:self-auto"
                       >
                         <RefreshCw className="w-3.5 h-3.5" />
@@ -2609,8 +2730,7 @@ export default function App() {
                       ) : (
                         queueList.map((queuePatient, idx) => {
                           const isCurrentUser =
-                            queuePatient.name.toLowerCase() ===
-                            (patient.name || '').toLowerCase()
+                            queuePatient.sessaoId === sessionId
 
                           return (
                             <div
@@ -2633,7 +2753,7 @@ export default function App() {
                                       className={`text-sm font-bold truncate ${isCurrentUser ? 'text-primary font-black' : 'text-base-content'}`}
                                     >
                                       {isCurrentUser
-                                        ? `${queuePatient.name} (Você)`
+                                        ? `${patient.name} (Você)`
                                         : maskPatientName(queuePatient.name)}
                                     </span>
                                     {isCurrentUser && (

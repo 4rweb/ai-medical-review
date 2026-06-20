@@ -125,7 +125,7 @@ Recursos da API que serão usados: **structured output (JSON schema)**,
 
 ## 6. Contrato de dados
 
-A fonte única da verdade é o arquivo **`triagem.contract.ts`** (tipos
+A fonte única da verdade é **`packages/contracts/src/index.ts`** (tipos
 TypeScript compartilhados front/back). Duas chamadas de IA:
 
 - **A) `POST /triagem/analisar`** (Coletor) → `AnalisarRelatoResponse`
@@ -151,7 +151,7 @@ Ver seção 2. Decisão: submeter no Track 4; não diluir em outros tracks.
 
 ### ADR-02 — Backend em Node.js/TypeScript
 Motivo principal: **contrato tipado de ponta a ponta** (mesmo
-`triagem.contract.ts` no front e no back), fluência do time em TS, e
+`@medical/contracts` no front e no back), fluência do time em TS, e
 integração Qwen idêntica à de Python (API OpenAI-compatível). Python só
 venceria se houvesse ML local/processamento pesado — não é o caso (apenas
 *chamamos* a API). Narrativa de engenharia forte: "stack tipado sem drift".
@@ -359,7 +359,8 @@ prompt + validador antes de prosseguir. Idealmente, revisão por alguém da saú
 - [ ] Frase de **projeto novo** na descrição (protótipo visual anterior
       descartado; agente/back/IA construídos do zero no período).
 - [ ] **Prova de Alibaba Cloud**: link para arquivo de código (ex.
-      `qwenClient.ts`) que usa serviço/API Alibaba (DashScope) + backend na
+      `apps/apis/src/qwen/qwen.service.ts`) que usa serviço/API Alibaba
+      (DashScope) + backend na
       Function Compute.
 - [ ] **Diagrama de arquitetura** anexado.
 - [ ] **Vídeo < 3 min** (YouTube/Vimeo/Youku), público; legendado em inglês

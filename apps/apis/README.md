@@ -23,7 +23,9 @@ Veja `.env.example`. Principais:
 | `INTERNAL_API_KEY` | Segredo compartilhado com o proxy BFF da web |
 | `DASHSCOPE_API_KEY` | Chave Qwen Cloud (DashScope) |
 | `DASHSCOPE_API_URL` | Base URL OpenAI-compatible da DashScope |
-| `QWEN_MODEL` | Modelo dos agentes (padrão `qwen3.6-flash`) |
+| `QWEN_MODEL` | Modelo padrão dos agentes (`qwen3.6-flash`) |
+| `QWEN_COLLECTOR_MODEL` | Override opcional do Coletor |
+| `QWEN_CLASSIFIER_MODEL` | Override opcional do Classificador |
 | `QWEN_MODEL_FALLBACKS` | (opcional) modelos de fallback p/ 503, vírgula |
 
 ## Segurança

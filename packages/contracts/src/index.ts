@@ -1,270 +1,359 @@
-/**
- * AI Medical Review — Contrato de dados (IA <-> Frontend)
- * ------------------------------------------------------------------
- * Fonte única da verdade. O frontend (React + TanStack) importa estes
- * tipos para renderizar e validar; o backend (Node.js na Alibaba)
- * devolve exatamente estas formas. As duas respostas geradas por IA
- * (AnalisarRelatoResponse e ClassificarResponse) são o JSON que o Qwen
- * produz via "structured output" — ou seja, este arquivo também é o
- * schema que você passa ao modelo.
- *
- * Há DUAS chamadas de IA no fluxo:
- *   A) /triagem/analisar   -> Agente COLETOR: lê o relato e gera as
- *                             perguntas adaptativas (Passo 3 -> 4)
- *   B) /triagem/classificar -> Agente CLASSIFICADOR (+ AGENDADOR): gera
- *                             a cor de Manchester e orientações (Passo 6 -> resultado)
- */
+import { z } from 'zod'
 
-export const CONTRATO_VERSAO = "1.0.0";
+export const CONTRATO_VERSAO = '2.1.0'
 
-/* =================================================================
- * 1. TIPOS COMPARTILHADOS
- * ================================================================= */
+export const NivelManchesterSchema = z.enum([
+  'vermelho',
+  'laranja',
+  'amarelo',
+  'verde',
+  'azul'
+])
+export type NivelManchester = z.infer<typeof NivelManchesterSchema>
 
-/** As cinco cores do Protocolo de Manchester. */
-export type NivelManchester = "vermelho" | "laranja" | "amarelo" | "verde" | "azul";
-
-/**
- * Metadados de cada cor — CONSTANTE DO FRONTEND, não vem da IA.
- * A IA devolve só o `nivel`; a tela enriquece com isto.
- */
 export const MANCHESTER: Record<
   NivelManchester,
   { rotulo: string; esperaMin: number; esperaMax: number; critico: boolean }
 > = {
-  vermelho: { rotulo: "Emergência",    esperaMin: 0,   esperaMax: 0,   critico: true  },
-  laranja:  { rotulo: "Muito urgente", esperaMin: 0,   esperaMax: 10,  critico: false },
-  amarelo:  { rotulo: "Urgente",       esperaMin: 0,   esperaMax: 60,  critico: false },
-  verde:    { rotulo: "Pouco urgente", esperaMin: 0,   esperaMax: 120, critico: false },
-  azul:     { rotulo: "Não urgente",   esperaMin: 0,   esperaMax: 240, critico: false },
-};
-
-/* =================================================================
- * 2. ENTRADA DO PACIENTE (frontend coleta — Passos 1, 2, 4, 5)
- * ================================================================= */
-
-/** Passo 1 — Identificação. */
-export interface DadosPaciente {
-  nome: string;
-  idade: number;
-  /** LGPD: precisa ser true antes de qualquer envio de dado de saúde. */
-  consentimentoLGPD: boolean;
+  vermelho: { rotulo: 'Emergência', esperaMin: 0, esperaMax: 0, critico: true },
+  laranja: {
+    rotulo: 'Muito urgente',
+    esperaMin: 0,
+    esperaMax: 10,
+    critico: false
+  },
+  amarelo: { rotulo: 'Urgente', esperaMin: 30, esperaMax: 60, critico: false },
+  verde: {
+    rotulo: 'Pouco urgente',
+    esperaMin: 60,
+    esperaMax: 120,
+    critico: false
+  },
+  azul: {
+    rotulo: 'Não urgente',
+    esperaMin: 120,
+    esperaMax: 240,
+    critico: false
+  }
 }
 
-/** Passo 2 — Relato livre (texto já editado pelo paciente). */
-export interface Relato {
-  /** Texto final (transcrição do áudio editada, ou digitado). */
-  texto: string;
-  origem: "audio" | "texto";
-  audioDuracaoSeg?: number;
+export const DadosPacienteSchema = z.object({
+  nome: z.string().trim().min(2).max(120),
+  idade: z.number().int().min(1).max(125),
+  sexoBiologico: z.enum(['masculino', 'feminino']).optional(),
+  consentimentoLGPD: z.literal(true)
+})
+export type DadosPaciente = z.infer<typeof DadosPacienteSchema>
+
+export const RelatoSchema = z.object({
+  texto: z.string().trim().min(5).max(5000),
+  origem: z.literal('texto')
+})
+export type Relato = z.infer<typeof RelatoSchema>
+
+export const SinaisVitaisSchema = z
+  .object({
+    temperaturaC: z.number().min(30).max(45).optional(),
+    freqCardiacaBpm: z.number().int().min(20).max(250).optional(),
+    pressaoSistolica: z.number().int().min(40).max(300).optional(),
+    pressaoDiastolica: z.number().int().min(20).max(200).optional(),
+    spo2: z.number().int().min(50).max(100).optional()
+  })
+  .refine(
+    value =>
+      (value.pressaoSistolica === undefined &&
+        value.pressaoDiastolica === undefined) ||
+      (value.pressaoSistolica !== undefined &&
+        value.pressaoDiastolica !== undefined),
+    { message: 'Informe pressão sistólica e diastólica juntas.' }
+  )
+export type SinaisVitais = z.infer<typeof SinaisVitaisSchema>
+
+export const OpcaoRespostaSchema = z.object({
+  valor: z.string().min(1).max(100),
+  rotulo: z.string().min(1).max(300),
+  sinaliza: z.literal('alerta').optional()
+})
+export type OpcaoResposta = z.infer<typeof OpcaoRespostaSchema>
+
+const PerguntaBaseSchema = z.object({
+  id: z.string().min(1).max(100),
+  pergunta: z.string().min(5).max(500),
+  obrigatoria: z.boolean(),
+  motivo: z.string().max(500).optional(),
+  pesoClinico: z.enum(['baixo', 'medio', 'alto']).optional()
+})
+
+export const PerguntaAdaptativaSchema = z.discriminatedUnion('tipo', [
+  PerguntaBaseSchema.extend({ tipo: z.literal('sim_nao') }),
+  PerguntaBaseSchema.extend({
+    tipo: z.literal('escolha_unica'),
+    opcoes: z.array(OpcaoRespostaSchema).min(2).max(12)
+  }),
+  PerguntaBaseSchema.extend({
+    tipo: z.literal('multipla_escolha'),
+    opcoes: z.array(OpcaoRespostaSchema).min(2).max(12)
+  }),
+  PerguntaBaseSchema.extend({
+    tipo: z.literal('escala'),
+    escala: z.object({
+      min: z.number().int(),
+      max: z.number().int(),
+      rotulos: z.record(z.string(), z.string()).optional()
+    })
+  })
+])
+export type PerguntaAdaptativa = z.infer<typeof PerguntaAdaptativaSchema>
+
+export const RespostaAdaptativaSchema = z.discriminatedUnion('tipo', [
+  z.object({
+    perguntaId: z.string().min(1),
+    tipo: z.literal('sim_nao'),
+    valor: z.boolean()
+  }),
+  z.object({
+    perguntaId: z.string().min(1),
+    tipo: z.literal('escolha_unica'),
+    valor: z.string().min(1)
+  }),
+  z.object({
+    perguntaId: z.string().min(1),
+    tipo: z.literal('multipla_escolha'),
+    valor: z.array(z.string().min(1)).min(1)
+  }),
+  z.object({
+    perguntaId: z.string().min(1),
+    tipo: z.literal('escala'),
+    valor: z.number().int()
+  })
+])
+export type RespostaAdaptativa = z.infer<typeof RespostaAdaptativaSchema>
+
+export const SintomaExtraidoSchema = z.object({
+  rotulo: z.string().min(1).max(200),
+  inicio: z.enum(['subito', 'gradual']).optional(),
+  localizacao: z.string().max(200).optional()
+})
+export type SintomaExtraido = z.infer<typeof SintomaExtraidoSchema>
+
+export const RedFlagSchema = z.object({
+  codigo: z.string().min(1).max(100),
+  descricao: z.string().min(1).max(500),
+  severidade: z.enum(['media', 'alta'])
+})
+export type RedFlag = z.infer<typeof RedFlagSchema>
+
+export const AlertaEmergenciaSchema = z.object({
+  motivo: z.string().min(1).max(500),
+  acao: z.string().min(1).max(500)
+})
+export type AlertaEmergencia = z.infer<typeof AlertaEmergenciaSchema>
+
+export const AUDIO_FORMATS = ['webm', 'wav', 'mp3', 'm4a', 'ogg'] as const
+export const AudioFormatSchema = z.enum(AUDIO_FORMATS)
+export type AudioFormat = z.infer<typeof AudioFormatSchema>
+
+export const TranscreverRequestSchema = z.object({
+  audioBase64: z.string().min(1),
+  formato: AudioFormatSchema
+})
+export type TranscreverRequest = z.infer<typeof TranscreverRequestSchema>
+
+export const TranscreverResponseSchema = z.object({
+  texto: z.string().max(5000),
+  versaoModelo: z.string().min(1)
+})
+export type TranscreverResponse = z.infer<typeof TranscreverResponseSchema>
+
+export const AnalisarRelatoRequestSchema = z.object({
+  paciente: DadosPacienteSchema,
+  relato: RelatoSchema
+})
+export type AnalisarRelatoRequest = z.infer<typeof AnalisarRelatoRequestSchema>
+
+export const AnalisarRelatoResponseSchema = z.object({
+  sessaoId: z.string().min(1),
+  sintomasIdentificados: z.array(SintomaExtraidoSchema).max(20),
+  redFlags: z.array(RedFlagSchema).max(20),
+  perguntas: z.array(PerguntaAdaptativaSchema).min(1).max(10),
+  alertaEmergencia: AlertaEmergenciaSchema.nullish(),
+  versaoModelo: z.string().min(1)
+})
+export type AnalisarRelatoResponse = z.infer<
+  typeof AnalisarRelatoResponseSchema
+>
+
+export const ClassificarRequestSchema = z.object({
+  sessaoId: z.string().min(1),
+  paciente: DadosPacienteSchema,
+  relato: RelatoSchema,
+  sintomasIdentificados: z.array(SintomaExtraidoSchema),
+  redFlagsColetor: z.array(RedFlagSchema),
+  perguntas: z.array(PerguntaAdaptativaSchema),
+  respostas: z.array(RespostaAdaptativaSchema),
+  nivelDor: z.number().int().min(0).max(10).optional(),
+  sinaisVitais: SinaisVitaisSchema.optional(),
+  versaoModeloColetor: z.string().min(1)
+})
+export type ClassificarRequest = z.infer<typeof ClassificarRequestSchema>
+
+export const ClassificacaoModeloSchema = z.object({
+  classificacao: z.object({
+    nivel: NivelManchesterSchema,
+    confianca: z.number().min(0).max(1),
+    justificativa: z.string().min(1).max(3000),
+    fatoresDeterminantes: z.array(z.string().min(1).max(500)).max(12)
+  }),
+  redFlags: z.array(RedFlagSchema).max(20),
+  emergencia: z.boolean()
+})
+export type ClassificacaoModelo = z.infer<typeof ClassificacaoModeloSchema>
+
+export const AgendamentoSchema = z.object({
+  especialidade: z.string().min(1).max(120),
+  local: z.string().min(1).max(200),
+  proximoSlot: z.string().datetime()
+})
+export type Agendamento = z.infer<typeof AgendamentoSchema>
+
+export const ClassificarResponseSchema = z.object({
+  sessaoId: z.string().min(1),
+  classificacao: ClassificacaoModeloSchema.shape.classificacao,
+  esperaEstimada: z.object({
+    min: z.number().int().min(0),
+    max: z.number().int().min(0),
+    unidade: z.literal('min')
+  }),
+  recomendacoes: z.array(z.string().min(1).max(500)).min(1).max(6),
+  redFlags: z.array(RedFlagSchema).max(20),
+  emergencia: z.boolean(),
+  disclaimer: z.string().min(1),
+  geradoEm: z.string().datetime(),
+  versaoModelo: z.string().min(1),
+  agendamento: AgendamentoSchema.optional(),
+  seguranca: z.object({
+    regrasAcionadas: z.array(z.string()),
+    classificacaoElevada: z.boolean(),
+    nivelOriginal: NivelManchesterSchema,
+    nivelFinal: NivelManchesterSchema
+  })
+})
+export type ClassificarResponse = z.infer<typeof ClassificarResponseSchema>
+
+export const SessaoTriagemSchema = z.object({
+  sessaoId: z.string().optional(),
+  paciente: DadosPacienteSchema.partial(),
+  relato: RelatoSchema.optional(),
+  sintomasIdentificados: z.array(SintomaExtraidoSchema),
+  redFlags: z.array(RedFlagSchema),
+  perguntas: z.array(PerguntaAdaptativaSchema),
+  respostas: z.array(RespostaAdaptativaSchema),
+  nivelDor: z.number().int().min(0).max(10).optional(),
+  sinaisVitais: SinaisVitaisSchema.optional(),
+  alertaEmergencia: AlertaEmergenciaSchema.optional(),
+  versaoModeloColetor: z.string().optional(),
+  resultado: ClassificarResponseSchema.optional()
+})
+export type SessaoTriagem = z.infer<typeof SessaoTriagemSchema>
+
+export const QueueColorSchema = z.enum([
+  'red',
+  'orange',
+  'yellow',
+  'green',
+  'blue'
+])
+export type QueueColor = z.infer<typeof QueueColorSchema>
+export const QueueStatusSchema = z.enum([
+  'aguardando',
+  'chamado',
+  'em_atendimento',
+  'atendido_urgente'
+])
+export type QueueStatus = z.infer<typeof QueueStatusSchema>
+
+export const QueuePatientSchema = z.object({
+  sessaoId: z.string(),
+  id: z.string(),
+  name: z.string(),
+  age: z.number().int(),
+  nomeMascarado: z.string(),
+  idade: z.number().int(),
+  color: QueueColorSchema,
+  title: z.string(),
+  sintomaPrincipal: z.string(),
+  status: QueueStatusSchema,
+  joinedAt: z.string().datetime(),
+  position: z.number().int().min(0).optional()
+})
+export type QueuePatient = z.infer<typeof QueuePatientSchema>
+
+export const TriagemFilaSubmitRequestSchema = z.object({
+  sessao: SessaoTriagemSchema.extend({
+    sessaoId: z.string(),
+    paciente: DadosPacienteSchema,
+    relato: RelatoSchema,
+    resultado: ClassificarResponseSchema
+  })
+})
+export type TriagemFilaSubmitRequest = z.infer<
+  typeof TriagemFilaSubmitRequestSchema
+>
+
+export const QueueResponseSchema = z.object({
+  queue: z.array(QueuePatientSchema),
+  patient: QueuePatientSchema.optional()
+})
+export type QueueResponse = z.infer<typeof QueueResponseSchema>
+
+export const AI_ERROR_CODES = {
+  quota: 'AI_QUOTA_EXCEEDED',
+  unavailable: 'AI_SERVICE_UNAVAILABLE',
+  invalid: 'AI_INVALID_RESPONSE'
+} as const
+export type AiErrorCode =
+  (typeof AI_ERROR_CODES)[keyof typeof AI_ERROR_CODES]
+
+export const RECOMENDACOES_POR_NIVEL: Record<NivelManchester, string[]> = {
+  vermelho: [
+    'Procure imediatamente a equipe de triagem ou ligue para o SAMU 192.',
+    'Não permaneça sozinho enquanto aguarda atendimento.',
+    'Informe imediatamente qualquer piora ou alteração de consciência.'
+  ],
+  laranja: [
+    'Apresente-se imediatamente à equipe de triagem.',
+    'Permaneça próximo à recepção e informe qualquer piora.',
+    'Não deixe a unidade antes de ser avaliado pela equipe.'
+  ],
+  amarelo: [
+    'Aguarde em local próximo à equipe de triagem.',
+    'Informe imediatamente se os sintomas piorarem.',
+    'Siga as orientações presenciais da equipe de saúde.'
+  ],
+  verde: [
+    'Aguarde a chamada conforme a prioridade clínica.',
+    'Informe à equipe se houver piora ou novo sintoma.',
+    'Esta classificação pode ser revista presencialmente.'
+  ],
+  azul: [
+    'Aguarde a orientação da equipe de recepção.',
+    'Informe se houver mudança ou piora dos sintomas.',
+    'A equipe poderá orientar o serviço mais adequado.'
+  ]
 }
 
-/** Passo 5 — Sinais vitais. TODOS opcionais: ausente = não informado. */
-export interface SinaisVitais {
-  temperaturaC?: number;
-  freqCardiacaBpm?: number;
-  pressaoSistolica?: number;
-  pressaoDiastolica?: number;
-  spo2?: number;
+export function isRespostaPreenchida(
+  pergunta: PerguntaAdaptativa,
+  resposta?: RespostaAdaptativa
+): boolean {
+  if (!resposta || resposta.perguntaId !== pergunta.id) return false
+  if (resposta.tipo === 'multipla_escolha') return resposta.valor.length > 0
+  if (resposta.tipo === 'escolha_unica') return resposta.valor.trim().length > 0
+  return true
 }
 
-/** Passo 5 — Nível de dor autorrelatado (0 a 10). */
-export type NivelDor = number;
-
-/* =================================================================
- * 3. PERGUNTAS ADAPTATIVAS (a IA gera — Passo 4 renderiza)
- * ================================================================= */
-
-export type TipoPergunta = "sim_nao" | "escolha_unica" | "multipla_escolha" | "escala";
-
-export interface OpcaoResposta {
-  /** ID estável (não muda com o idioma/texto). */
-  valor: string;
-  /** Texto exibido ao paciente. */
-  rotulo: string;
-  /** Marca opções que acendem um sinal de alerta (ex.: "irradia pro braço"). */
-  sinaliza?: "alerta";
-}
-
-/**
- * Uma pergunta renderizável. O componente <CartaoPergunta> faz o switch
- * por `tipo` e escolhe o input do DaisyUI correspondente.
- */
-export interface PerguntaAdaptativa {
-  id: string;
-  tipo: TipoPergunta;
-  pergunta: string;
-  obrigatoria: boolean;
-  /** Opções (só para escolha_unica / multipla_escolha). */
-  opcoes?: OpcaoResposta[];
-  /** Config da escala (só para tipo "escala"). */
-  escala?: { min: number; max: number; rotulos?: Record<number, string> };
-  /** Por que a IA perguntou isso — explicabilidade (útil no painel/admin). */
-  motivo?: string;
-  /** Peso clínico que esta pergunta tem na classificação. */
-  pesoClinico?: "baixo" | "medio" | "alto";
-}
-
-/**
- * Resposta do paciente — união discriminada por `tipo`, para o front
- * validar e o back tipar sem ambiguidade.
- */
-export type RespostaAdaptativa =
-  | { perguntaId: string; tipo: "sim_nao"; valor: boolean }
-  | { perguntaId: string; tipo: "escolha_unica"; valor: string }
-  | { perguntaId: string; tipo: "multipla_escolha"; valor: string[] }
-  | { perguntaId: string; tipo: "escala"; valor: number };
-
-/* =================================================================
- * 4. SINAIS CLÍNICOS QUE A IA EXTRAI
- * ================================================================= */
-
-/** Sintoma extraído do relato — alimenta os chips do Passo 3 (reais, não placeholder). */
-export interface SintomaExtraido {
-  rotulo: string;
-  inicio?: "subito" | "gradual";
-  localizacao?: string;
-}
-
-/** Sinal de alerta clínico (ex.: cefaleia súbita = possível vermelho). */
-export interface RedFlag {
-  codigo: string;
-  descricao: string;
-  severidade: "media" | "alta";
-}
-
-/** Alerta de emergência mostrado IMEDIATAMENTE, sem esperar a classificação final. */
-export interface AlertaEmergencia {
-  motivo: string;
-  /** Ação recomendada, ex.: "Procure atendimento imediato / ligue 192". */
-  acao: string;
-}
-
-/* =================================================================
- * 5. CONTRATO A — ANALISAR RELATO (Coletor)  POST /triagem/analisar
- * ================================================================= */
-
-export interface AnalisarRelatoRequest {
-  paciente: DadosPaciente;
-  relato: Relato;
-}
-
-/** O que a IA devolve para montar o Passo 4 (e os chips do Passo 3). */
-export interface AnalisarRelatoResponse {
-  sessaoId: string;
-  sintomasIdentificados: SintomaExtraido[];
-  redFlags: RedFlag[];
-  perguntas: PerguntaAdaptativa[];
-  /** Se o relato já indica emergência, vem preenchido e a UI escala na hora. */
-  alertaEmergencia?: AlertaEmergencia;
-  versaoModelo: string;
-}
-
-/* =================================================================
- * 6. CONTRATO B — CLASSIFICAR (Classificador + Agendador)
- *    POST /triagem/classificar
- * ================================================================= */
-
-export interface ClassificarRequest {
-  sessaoId: string;
-  paciente: DadosPaciente;
-  relato: Relato;
-  sintomasIdentificados: SintomaExtraido[];
-  respostas: RespostaAdaptativa[];
-  nivelDor: NivelDor;
-  sinaisVitais?: SinaisVitais;
-}
-
-/** Saída do Agendador (pode ser mock no começo). */
-export interface Agendamento {
-  especialidadeSugerida: string;
-  local?: string;
-  profissional?: string;
-  horarioEstimado?: string;
-}
-
-/**
- * Resultado final. ESTE é o objeto que você pede ao Qwen via structured
- * output. `justificativa` + `fatoresDeterminantes` são o diferencial:
- * a IA EXPLICA a cor, não devolve uma caixa-preta.
- */
-export interface ClassificarResponse {
-  sessaoId: string;
-  classificacao: {
-    nivel: NivelManchester;
-    /** Confiança 0..1 — a UI pode usar para sinalizar revisão humana. */
-    confianca: number;
-    justificativa: string;
-    fatoresDeterminantes: string[];
-  };
-  esperaEstimada: { min: number; max: number; unidade: "min" };
-  recomendacoes: string[];
-  redFlags: RedFlag[];
-  /** true -> tela de resultado prioriza "Chamar SAMU / atendimento imediato". */
-  emergencia: boolean;
-  agendamento?: Agendamento;
-  disclaimer: string;
-  geradoEm: string; // ISO 8601
-  versaoModelo: string;
-}
-
-/* =================================================================
- * 7. REGISTRO PARA O PAINEL ADMIN (ApsaraDB -> dashboard / fila)
- * ================================================================= */
-
-export type StatusTriagem =
-  | "aguardando"
-  | "chamando"
-  | "em_consultorio"
-  | "concluida"
-  | "cancelada";
-
-/** O que o painel da equipe e a fila eletrônica consomem. */
-export interface TriagemRegistro {
-  sessaoId: string;
-  paciente: { nomeMascarado: string; idade: number };
-  nivel: NivelManchester;
-  sintomaPrincipal: string;
-  nivelDor: NivelDor;
-  sinaisVitais?: SinaisVitais;
-  status: StatusTriagem;
-  criadoEm: string;       // ISO 8601
-  posicaoFila?: number;
-}
-
-/* =================================================================
- * 8. ESTADO GLOBAL DA SESSÃO (TanStack Store)
- *    Vai sendo preenchido etapa a etapa; a tela de Revisão (Passo 6)
- *    lê tudo daqui antes de chamar /classificar.
- * ================================================================= */
-
-export interface SessaoTriagem {
-  sessaoId?: string;
-  paciente: Partial<DadosPaciente>;
-  relato?: Relato;
-  sintomasIdentificados: SintomaExtraido[];
-  perguntas: PerguntaAdaptativa[];
-  respostas: RespostaAdaptativa[];
-  nivelDor?: NivelDor;
-  sinaisVitais?: SinaisVitais;
-  resultado?: ClassificarResponse;
-}
-
-/* =================================================================
- * 9. PAINEL ELETRÔNICO — FILA EM TEMPO REAL (client ↔ server)
- *    Retornado por GET /api/triage/queue e POST /api/triage/queue/submit
- * ================================================================= */
-
-export type QueueColor = 'red' | 'orange' | 'yellow' | 'green' | 'blue';
-export type QueueStatus = 'atendido_urgente' | 'aguardando' | 'chamado' | 'em_atendimento';
-
-export interface QueuePatient {
-  id: string;
-  name: string;
-  age: number;
-  color: QueueColor;
-  title: string;
-  status: QueueStatus;
-  joinedAt: string;
-  position?: number;
+export function mergeRedFlags(...groups: RedFlag[][]): RedFlag[] {
+  const unique = new Map<string, RedFlag>()
+  for (const flag of groups.flat()) unique.set(flag.codigo, flag)
+  return [...unique.values()]
 }

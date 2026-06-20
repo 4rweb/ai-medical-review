@@ -3,13 +3,31 @@
 Pré-triagem médica (Protocolo de Manchester) com pipeline de agentes Qwen.
 Frontend e backend são **apps isolados** num workspace pnpm.
 
+> **Global AI Hackathon with Qwen Cloud — Track 4: Autopilot Agent.**
+> End-to-end automation of a real clinical workflow: free-text/voice report →
+> AI analysis → adaptive questions → Manchester risk classification → scheduling
+> → hospital queue, with deterministic safety overrides and human-in-the-loop
+> checkpoints (editable transcription + review screen + schedule confirmation).
+>
+> **New project:** built from scratch and significantly developed during the
+> Hackathon Submission Period (an earlier visual prototype was discarded; the
+> agent pipeline, NestJS backend and Qwen integration are new work).
+>
+> **License:** MIT (see [`LICENSE`](./LICENSE)).
+>
+> **Proof of Alibaba Cloud usage:** the backend calls Alibaba's Qwen Cloud
+> (DashScope) in [`apps/apis/src/qwen/qwen.service.ts`](./apps/apis/src/qwen/qwen.service.ts).
+
 ```
 medical-review/
 ├── apps/
 │   ├── web/    → Frontend (Vite + React + Tailwind/DaisyUI). SÓ frontend.
-│   └── apis/   → Backend NestJS. Endpoints /api/triage/* + IA Qwen.
+│   ├── apis/   → Backend NestJS. Endpoints /api/triage/* + IA Qwen + ApsaraDB.
+│   └── mcp/    → Servidor MCP expondo as ferramentas clínicas (stdio).
 └── packages/
-    └── contracts/  → @medical/contracts: contrato tipado compartilhado.
+    ├── contracts/  → @medical/contracts: contrato tipado compartilhado.
+    └── clinical/   → @medical/clinical: lógica clínica determinística (fonte
+                      única usada pelo function calling do backend E pelo MCP).
 ```
 
 ## Arquitetura de segurança (app público)
@@ -59,3 +77,40 @@ Todas as rotas (exceto `/health`) exigem o header `x-internal-api-key`.
 Qwen Cloud (DashScope, OpenAI-compatible), modelo **`qwen3.6-flash`** via SDK
 `openai`. Se a chave estiver ausente ou a IA falhar/estourar cota, há um
 **motor de fallback local** (regras PT-BR) que mantém o fluxo funcionando.
+
+O classificador usa **function calling** com duas ferramentas determinísticas
+(`verificarFaixaVital`, `buscarDisponibilidadeConsultorio`). A disponibilidade
+do encaixe é lida **da trilha do executor de tools**, não do texto do modelo.
+
+## Banco de dados (ApsaraDB / PostgreSQL)
+
+Persistência via **Drizzle ORM + `pg`**. Configure `DATABASE_URL` em
+`apps/apis/.env` e aplique a migração:
+
+```bash
+pnpm --filter apis db:generate   # gera SQL a partir do schema (já versionado)
+pnpm --filter apis db:migrate    # aplica no ApsaraDB
+```
+
+Sem `DATABASE_URL`, o app degrada para armazenamento em memória (fila não
+persiste; auditoria vai só para o log). A fila e a **trilha de auditoria** de
+elevações de red-flag (`audit_logs`) ficam no banco.
+
+## Servidor MCP
+
+`apps/mcp` expõe as ferramentas clínicas via **Model Context Protocol**,
+reaproveitando exatamente a mesma lógica de `@medical/clinical` usada pelo
+function calling do backend — host canônico de tools, sem duplicação.
+
+Dois transportes:
+
+```bash
+pnpm dev                    # sobe api + web + MCP (HTTP) juntos
+pnpm --filter mcp start     # servidor MCP sempre ligado (Streamable HTTP)
+                            # → http://localhost:3002/mcp  (health: /health)
+pnpm --filter mcp inspect   # MCP Inspector via stdio (sobe o processo sob demanda)
+```
+
+O modo HTTP usa sessão (`mcp-session-id`): o cliente faz `initialize` e mantém a
+sessão nas chamadas seguintes. Ferramentas expostas: `verificarFaixaVital`,
+`buscarDisponibilidadeConsultorio`.

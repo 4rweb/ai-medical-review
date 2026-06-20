@@ -1,12 +1,18 @@
 import { NestFactory } from '@nestjs/core'
 import { ValidationPipe, Logger } from '@nestjs/common'
+import type { NestExpressApplication } from '@nestjs/platform-express'
 import helmet from 'helmet'
 import { AppModule } from './app.module'
 import { HttpExceptionFilter } from './common/http-exception.filter'
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: false })
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bufferLogs: false
+  })
   const logger = new Logger('Bootstrap')
+
+  // Áudio para transcrição chega como base64 em JSON — eleva o limite do parser.
+  app.useBodyParser('json', { limit: '15mb' })
 
   const port = Number(process.env.API_PORT) || 3001
 
@@ -30,13 +36,12 @@ async function bootstrap() {
   // Todas as rotas ficam sob /api (o frontend chama /api/triage/*).
   app.setGlobalPrefix('api')
 
-  // Validação/transformação de entrada. whitelist desligado de propósito:
-  // os corpos de triagem são objetos aninhados dinâmicos e não devem ser podados.
+  // Validação estrutural detalhada é feita pelos schemas Zod compartilhados.
   app.useGlobalPipes(
     new ValidationPipe({
       transform: true,
-      forbidNonWhitelisted: false,
-      whitelist: false
+      forbidNonWhitelisted: true,
+      whitelist: true
     })
   )
 
