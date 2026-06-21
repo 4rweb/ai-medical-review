@@ -1,7 +1,7 @@
 # AI Medical Review — Monorepo
 
-Pré-triagem médica (Protocolo de Manchester) com pipeline de agentes Qwen.
-Frontend e backend são **apps isolados** num workspace pnpm.
+Medical pre-triage (Manchester Protocol) powered by a Qwen agent pipeline.
+Frontend and backend are **isolated apps** in a pnpm workspace.
 
 > **Global AI Hackathon with Qwen Cloud — Track 4: Autopilot Agent.**
 > End-to-end automation of a real clinical workflow: free-text/voice report →
@@ -21,102 +21,108 @@ Frontend e backend são **apps isolados** num workspace pnpm.
 ```
 medical-review/
 ├── apps/
-│   ├── web/    → Frontend (Vite + React + Tailwind/DaisyUI). SÓ frontend.
-│   ├── apis/   → Backend NestJS. Endpoints /api/triage/* + IA Qwen + ApsaraDB.
-│   └── mcp/    → Servidor MCP expondo as ferramentas clínicas (stdio).
+│   ├── web/    → Frontend (Vite + React + Tailwind/DaisyUI). Frontend only.
+│   ├── apis/   → NestJS backend. /api/triage/* endpoints + Qwen AI + ApsaraDB.
+│   └── mcp/    → MCP server exposing the clinical tools (stdio + HTTP).
 └── packages/
-    ├── contracts/  → @medical/contracts: contrato tipado compartilhado.
-    └── clinical/   → @medical/clinical: lógica clínica determinística (fonte
-                      única usada pelo function calling do backend E pelo MCP).
+    ├── contracts/  → @medical/contracts: shared typed contract.
+    └── clinical/   → @medical/clinical: deterministic clinical logic (single
+                      source used by the backend function calling AND the MCP).
 ```
 
-## Arquitetura de segurança (app público)
+## Security architecture (public app)
 
-O frontend chama `/api/*` na **mesma origem**. Em dev, o **proxy do Vite**
-encaminha para o NestJS (`:3001`) e injeta o header `x-internal-api-key` no
-**lado do servidor** — o segredo nunca vai ao bundle/browser. O NestJS exige
-esse segredo (+ CORS allowlist + Origin/Referer + rate-limit), de modo que
-**só a aplicação web** consegue usar a API.
+The frontend calls `/api/*` on the **same origin**. In dev, the **Vite proxy**
+forwards to NestJS (`:3001`) and injects the `x-internal-api-key` header on the
+**server side** — the secret never reaches the bundle/browser. NestJS requires
+that secret (+ CORS allowlist + Origin/Referer + rate-limit), so that **only the
+web app** can use the API.
 
-> Em produção (web estático), o host deve injetar o segredo no hop servidor
-> (rewrite/Edge Function na Vercel, ou `proxy_set_header` no nginx).
+> In production (static web), the host must inject the secret on the server hop
+> (rewrite/Edge Function on Vercel, or `proxy_set_header` on nginx).
 
-## Como rodar (dev)
+## Running (dev)
 
-Pré-requisitos: Node 20+, pnpm 11+.
+Prerequisites: Node 20+, pnpm 11+.
 
 ```bash
-pnpm install                      # na raiz (instala os 3 projetos)
+pnpm install                      # at the root (installs all 3 projects)
 
-# Configure os .env (copie dos .env.example) — o INTERNAL_API_KEY DEVE ser
-# o mesmo em apps/web/.env e apps/apis/.env.
+# Configure the .env files (copy from .env.example) — INTERNAL_API_KEY MUST be
+# the same in apps/web/.env and apps/apis/.env.
 cp apps/apis/.env.example apps/apis/.env
 cp apps/web/.env.example  apps/web/.env
 
-pnpm dev                          # sobe web (:3000) + apis (:3001) em paralelo
-# ou separadamente:
-pnpm dev:apis                     # NestJS em http://localhost:3001/api
-pnpm dev:web                      # Vite   em http://localhost:3000
+pnpm dev                          # starts web (:3000) + apis (:3001) in parallel
+# or separately:
+pnpm dev:apis                     # NestJS at http://localhost:3001/api
+pnpm dev:web                      # Vite   at http://localhost:3000
 ```
 
-## Endpoints (`apps/apis`, prefixo `/api`)
+## Endpoints (`apps/apis`, `/api` prefix)
 
-| Método | Rota                     | Função |
-|--------|--------------------------|--------|
-| GET    | `/api/health`            | Healthcheck (público) |
-| POST   | `/api/triage/analyze`    | Coletor — sintomas + perguntas adaptativas |
-| POST   | `/api/triage/classify`   | Classificador — cor de Manchester |
-| GET    | `/api/triage/queue`      | Fila em tempo real |
-| POST   | `/api/triage/queue/submit`  | Insere paciente na fila |
-| POST   | `/api/triage/queue/advance` | Avança a fila |
+| Method | Route                       | Purpose |
+|--------|-----------------------------|---------|
+| GET    | `/api/health`               | Healthcheck (public) |
+| POST   | `/api/triage/analyze`       | Collector — symptoms + adaptive questions |
+| POST   | `/api/triage/classify`      | Classifier — Manchester color |
+| POST   | `/api/triage/transcrever`   | Qwen-ASR — audio → editable text |
+| GET    | `/api/triage/queue`         | Real-time queue |
+| POST   | `/api/triage/queue/submit`  | Add a patient to the queue |
+| POST   | `/api/triage/queue/advance` | Advance the queue |
 
-Todas as rotas (exceto `/health`) exigem o header `x-internal-api-key`.
+Every route except `/health` requires the `x-internal-api-key` header.
 
-## IA
+## AI
 
-Qwen Cloud (DashScope, OpenAI-compatible), modelo **`qwen3.6-flash`** via SDK
-`openai`. Se a chave estiver ausente ou a IA falhar/estourar cota, há um
-**motor de fallback local** (regras PT-BR) que mantém o fluxo funcionando.
+Qwen Cloud (DashScope, OpenAI-compatible), model **`qwen3.6-flash`** via the
+`openai` SDK. If the key is missing or the AI fails/exceeds quota, a **local
+fallback engine** (pt-BR rules) keeps the flow working.
 
-O classificador usa **function calling** com duas ferramentas determinísticas
-(`verificarFaixaVital`, `buscarDisponibilidadeConsultorio`). A disponibilidade
-do encaixe é lida **da trilha do executor de tools**, não do texto do modelo.
+The classifier uses **function calling** with two deterministic tools
+(`verificarFaixaVital`, `buscarDisponibilidadeConsultorio`). The appointment
+availability is read **from the tool-executor trail**, not from the model text.
 
-## Banco de dados (ApsaraDB / PostgreSQL)
+Voice input is transcribed by **Qwen-ASR** (`qwen3-asr-flash`): the browser
+re-encodes the recording to 16 kHz mono WAV and posts it as a base64 data URI;
+the transcript lands in an **editable field** the patient can correct first.
 
-Persistência via **Drizzle ORM + `pg`**. Configure `DATABASE_URL` em
-`apps/apis/.env` e aplique a migração:
+## Database (ApsaraDB / PostgreSQL)
+
+Persistence via **Drizzle ORM + `pg`**. Set `DATABASE_URL` in `apps/apis/.env`
+and apply the migration:
 
 ```bash
-pnpm --filter apis db:generate   # gera SQL a partir do schema (já versionado)
-pnpm --filter apis db:migrate    # aplica no ApsaraDB
+pnpm --filter apis db:generate   # generates SQL from the schema (already versioned)
+pnpm --filter apis db:migrate    # applies it to ApsaraDB
 ```
 
-Sem `DATABASE_URL`, o app degrada para armazenamento em memória (fila não
-persiste; auditoria vai só para o log). A fila e a **trilha de auditoria** de
-elevações de red-flag (`audit_logs`) ficam no banco.
+Without `DATABASE_URL`, the app degrades to in-memory storage (queue does not
+persist; audit goes to the log only). The queue and the **audit trail** of
+red-flag escalations (`audit_logs`) live in the database.
 
-## Servidor MCP
+## MCP server
 
-`apps/mcp` expõe as ferramentas clínicas via **Model Context Protocol**,
-reaproveitando exatamente a mesma lógica de `@medical/clinical` usada pelo
-function calling do backend — host canônico de tools, sem duplicação.
+`apps/mcp` exposes the clinical tools over the **Model Context Protocol**,
+reusing exactly the same `@medical/clinical` logic the backend function calling
+uses — a canonical tool host, no duplication.
 
-Dois transportes:
+Two transports:
 
 ```bash
-pnpm dev                    # sobe api + web + MCP (HTTP) juntos
-pnpm --filter mcp start     # servidor MCP sempre ligado (Streamable HTTP)
+pnpm dev                    # starts api + web + MCP (HTTP) together
+pnpm --filter mcp start     # always-on MCP server (Streamable HTTP)
                             # → http://localhost:3002/mcp  (health: /health)
-pnpm --filter mcp inspect   # MCP Inspector via stdio (sobe o processo sob demanda)
+pnpm --filter mcp inspect   # MCP Inspector via stdio (spawns the process on demand)
 ```
 
-O modo HTTP usa sessão (`mcp-session-id`): o cliente faz `initialize` e mantém a
-sessão nas chamadas seguintes. Ferramentas expostas: `verificarFaixaVital`,
+The HTTP mode is session-based (`mcp-session-id`): the client `initialize`s and
+keeps the session on subsequent calls. Exposed tools: `verificarFaixaVital`,
 `buscarDisponibilidadeConsultorio`.
 
-## Documentação
+## Documentation
 
 - [Architecture + diagram](./docs/architecture.md)
 - [Red-flag test script (§14)](./docs/red-flag-tests.md)
 - [Project story](./docs/ai-medical-review-story.md)
+- [Submission eligibility checklist](./docs/submission-checklist.md)

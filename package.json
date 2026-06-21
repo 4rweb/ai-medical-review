@@ -9,6 +9,8 @@
     "dev:apis": "pnpm --filter apis dev",
     "dev:mcp": "pnpm --filter mcp dev",
     "build": "pnpm -r build",
+    "build:railway": "pnpm --filter apis build",
+    "start:railway": "concurrently -k -n mcp,api -c magenta,blue \"pnpm --filter mcp start\" \"node apps/apis/dist/main.js\"",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test"
   },

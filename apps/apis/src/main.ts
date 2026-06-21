@@ -14,7 +14,8 @@ async function bootstrap() {
   // Áudio para transcrição chega como base64 em JSON — eleva o limite do parser.
   app.useBodyParser('json', { limit: '15mb' })
 
-  const port = Number(process.env.API_PORT) || 3001
+  // O host de produção injeta PORT; localmente caímos em API_PORT/3001.
+  const port = Number(process.env.PORT) || Number(process.env.API_PORT) || 3001
 
   // Allowlist de origens que podem chamar a API (a aplicação web).
   const webOrigins = (process.env.WEB_ORIGIN || 'http://localhost:3000')
@@ -47,8 +48,10 @@ async function bootstrap() {
 
   app.useGlobalFilters(new HttpExceptionFilter())
 
-  await app.listen(port, '0.0.0.0')
-  logger.log(`🚀 API NestJS rodando em http://0.0.0.0:${port}/api`)
+  // Bind IPv6 dual-stack ('::'): aceita IPv4 (ingress público) e IPv6 (redes
+  // privadas que são IPv6-only) — robusto para serviço único ou separado.
+  await app.listen(port, '::')
+  logger.log(`🚀 API NestJS rodando na porta ${port} (prefixo /api)`)
   logger.log(`🔒 CORS allowlist: ${webOrigins.join(', ')}`)
 }
 

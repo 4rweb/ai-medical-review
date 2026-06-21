@@ -128,8 +128,10 @@ async function startHttp(port: number): Promise<void> {
   app.delete('/mcp', handleSession)
 
   await new Promise<void>((resolve, reject) => {
-    const httpServer = app.listen(port, () => {
-      console.error(`[mcp] Streamable HTTP em http://localhost:${port}/mcp`)
+    // Bind IPv6 dual-stack ('::'): atende localhost (mesma instância, via
+    // 127.0.0.1) e redes privadas IPv6-only (se virar serviço próprio).
+    const httpServer = app.listen(port, '::', () => {
+      console.error(`[mcp] Streamable HTTP na porta ${port} (path /mcp)`)
     })
 
     httpServer.once('error', reject)
