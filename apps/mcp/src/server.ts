@@ -128,10 +128,13 @@ async function startHttp(port: number): Promise<void> {
   app.delete('/mcp', handleSession)
 
   await new Promise<void>((resolve, reject) => {
-    // Bind IPv6 dual-stack ('::'): atende localhost (mesma instância, via
-    // 127.0.0.1) e redes privadas IPv6-only (se virar serviço próprio).
-    const httpServer = app.listen(port, '::', () => {
-      console.error(`[mcp] Streamable HTTP na porta ${port} (path /mcp)`)
+    // Em instância única o MCP fica só no loopback (127.0.0.1) para NÃO ser
+    // exposto pelo proxy do host — assim o tráfego público vai para a API, não
+    // para cá. Para rodar como serviço próprio, defina MCP_HOST=:: (rede
+    // privada, IPv6 dual-stack).
+    const host = process.env.MCP_HOST || '127.0.0.1'
+    const httpServer = app.listen(port, host, () => {
+      console.error(`[mcp] Streamable HTTP em ${host}:${port} (path /mcp)`)
     })
 
     httpServer.once('error', reject)
