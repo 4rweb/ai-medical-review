@@ -11,7 +11,7 @@ export function LanguageGate({ onSelect }: LanguageGateProps) {
 
   return (
     <main className="min-h-screen bg-base-200 text-base-content grid place-items-center px-5 py-10">
-      <section className="w-full max-w-xl overflow-hidden rounded-[2rem] border border-base-300 bg-base-100 shadow-2xl">
+      <section className="w-full max-w-xl overflow-hidden rounded-4xl border border-base-300 bg-base-100 shadow-2xl">
         <div className="bg-primary px-8 py-7 text-primary-content">
           <div className="mb-5 flex items-center gap-3">
             <span className="grid h-12 w-12 place-items-center rounded-2xl bg-white/15">
