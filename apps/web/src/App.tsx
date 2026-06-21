@@ -897,28 +897,6 @@ export default function App() {
       data-theme={isDarkMode ? 'night' : 'light'}
       className="min-h-screen bg-base-200 text-base-content font-sans transition-colors duration-200 flex flex-col justify-between"
     >
-      <div className="fixed right-4 top-4 z-40 flex items-center gap-1 rounded-full border border-base-300 bg-base-100/95 p-1 shadow-lg backdrop-blur">
-        {(['pt-BR', 'en'] as const).map(option => (
-          <button
-            key={option}
-            type="button"
-            aria-label={
-              option === 'pt-BR'
-                ? 'Alterar idioma para português'
-                : 'Change language to English'
-            }
-            className={`rounded-full px-3 py-1.5 text-xs font-black transition ${
-              activeIdioma === option
-                ? 'bg-primary text-primary-content'
-                : 'text-base-content/60 hover:bg-base-200'
-            }`}
-            onClick={() => handleLanguageChange(option)}
-          >
-            {option === 'pt-BR' ? 'PT' : 'EN'}
-          </button>
-        ))}
-      </div>
-
       {/* Toast Notification */}
       {customToast && (
         <div
@@ -3021,7 +2999,30 @@ export default function App() {
               </button>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap justify-end">
+              {/* Language Switch */}
+              <div className="flex items-center gap-1 rounded-full border border-base-300 bg-base-100/95 p-1 shadow-sm backdrop-blur">
+                {(['pt-BR', 'en'] as const).map(option => (
+                  <button
+                    key={option}
+                    type="button"
+                    aria-label={
+                      option === 'pt-BR'
+                        ? 'Alterar idioma para português'
+                        : 'Change language to English'
+                    }
+                    className={`rounded-full px-3 py-1.5 text-xs font-black transition ${
+                      activeIdioma === option
+                        ? 'bg-primary text-primary-content'
+                        : 'text-base-content/60 hover:bg-base-200'
+                    }`}
+                    onClick={() => handleLanguageChange(option)}
+                  >
+                    {option === 'pt-BR' ? 'PT' : 'EN'}
+                  </button>
+                ))}
+              </div>
+
               {/* Light/Dark mode Toggle */}
               <button
                 id="theme_toggle"
