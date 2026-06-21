@@ -29,6 +29,7 @@ import {
   CalendarClock,
   MapPin
 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { PatientDetails, SymptomInput, Vitals, ManchesterColor } from './types'
 import {
   AlertaEmergencia,
@@ -37,8 +38,9 @@ import {
   PerguntaAdaptativa,
   RespostaAdaptativa,
   ClassificarResponse,
+  Idioma,
   NivelManchester,
-  MANCHESTER,
+  MANCHESTER_ROTULOS,
   SintomaExtraido,
   RedFlag,
   SinaisVitais,
@@ -53,10 +55,16 @@ import {
   useTriageQueue
 } from './triage/query'
 import { blobToWavBase64 } from './triage/audio'
+import { LanguageGate } from './components/LanguageGate'
+import { useLocalizedDom } from './i18n-dom'
+import { namespaces } from './i18n'
 
-const extractSymptomKeywordsFromText = (text: string): string[] => {
+const extractSymptomKeywordsFromText = (
+  text: string,
+  idioma: Idioma
+): string[] => {
   if (!text) return []
-  const parts = text.split(/[,.;]|\s+e\s+|\s+ou\s+/i)
+  const parts = text.split(/[,.;]|\s+(?:e|ou|and|or)\s+/i)
   const stopWords = new Set([
     'estou',
     'com',
@@ -101,7 +109,30 @@ const extractSymptomKeywordsFromText = (text: string): string[] => {
     'ruim',
     'mal',
     'pior',
-    'melhor'
+    'melhor',
+    'i',
+    'am',
+    'with',
+    'a',
+    'an',
+    'the',
+    'very',
+    'more',
+    'pain',
+    'strong',
+    'feeling',
+    'have',
+    'days',
+    'since',
+    'for',
+    'my',
+    'in',
+    'on',
+    'of',
+    'it',
+    'bad',
+    'worse',
+    'better'
   ])
 
   const candidates: string[] = []
@@ -121,7 +152,20 @@ const extractSymptomKeywordsFromText = (text: string): string[] => {
     'visão turva',
     'dor abdominal',
     'cefaleia',
-    'cafaleia'
+    'cafaleia',
+    'ear pain',
+    'headache',
+    'chest pain',
+    'shortness of breath',
+    'sore throat',
+    'stomach pain',
+    'back pain',
+    'cold sweat',
+    'hearing loss',
+    'high blood pressure',
+    'high fever',
+    'blurred vision',
+    'abdominal pain'
   ]
 
   let remainingText = text.toLowerCase()
@@ -136,7 +180,10 @@ const extractSymptomKeywordsFromText = (text: string): string[] => {
     const cleaned = part
       .trim()
       .toLowerCase()
-      .replace(/^(estou com|sinto|sentindo|tenho|com|uma|um)\s+/i, '')
+      .replace(
+        /^(estou com|sinto|sentindo|tenho|com|uma|um|i am|i'm|i feel|feeling|i have|with|a|an)\s+/i,
+        ''
+      )
       .trim()
     if (cleaned.length > 2) {
       const words = cleaned.split(/\s+/).filter(w => !stopWords.has(w))
@@ -160,6 +207,17 @@ const extractSymptomKeywordsFromText = (text: string): string[] => {
 }
 
 export default function App() {
+  const { i18n } = useTranslation(namespaces)
+  const [idioma, setIdioma] = useState<Idioma | null>(null)
+  const activeIdioma = idioma || 'pt-BR'
+  useLocalizedDom(idioma)
+  const tr = (text: string) =>
+    i18n.t(text, {
+      ns: namespaces,
+      defaultValue: text,
+      keySeparator: false
+    })
+
   // Theme state
   const [isDarkMode, setIsDarkMode] = useState<boolean>(false)
 
@@ -260,6 +318,10 @@ export default function App() {
   }, [isDarkMode])
 
   useEffect(() => {
+    document.documentElement.lang = activeIdioma
+  }, [activeIdioma])
+
+  useEffect(() => {
     const protectDraft = (event: BeforeUnloadEvent) => {
       if (!patient.name && !symptoms.text && !sessionId) return
       event.preventDefault()
@@ -282,6 +344,7 @@ export default function App() {
       const payload = TriagemFilaSubmitRequestSchema.parse({
         sessao: {
           sessaoId: sessionId,
+          idioma: activeIdioma,
           paciente: {
             nome: patient.name,
             idade: patient.age,
@@ -307,11 +370,13 @@ export default function App() {
       })
       await submitQueueMutation.mutateAsync(payload)
       setStep(8)
-      triggerToast('🚀 Dados transmitidos para a Enfermagem & Recepção!')
+      triggerToast(`🚀 ${tr('Dados transmitidos para a Enfermagem & Recepção!')}`)
     } catch (err) {
       console.error('Erro no envio para recepção:', err)
       setAiErrorMessage(
-        err instanceof Error ? err.message : 'Não foi possível transmitir a ficha.'
+        err instanceof Error
+          ? err.message
+          : tr('Não foi possível transmitir a ficha.')
       )
       setQuotaAction('queue')
       setShowQuotaModal(true)
@@ -319,20 +384,25 @@ export default function App() {
   }
 
   const simulateQueueAdvance = () => {
-    triggerToast('A fila é atualizada automaticamente a cada 5 segundos.')
+    triggerToast(tr('A fila é atualizada automaticamente a cada 5 segundos.'))
   }
 
   const getManchesterColorClass = (color: string) => {
     switch (color) {
       case 'vermelho':
+      case 'red':
         return 'bg-red-500 animate-pulse'
       case 'laranja':
+      case 'orange':
         return 'bg-orange-500'
       case 'amarelo':
+      case 'yellow':
         return 'bg-yellow-500'
       case 'verde':
+      case 'green':
         return 'bg-emerald-500'
       case 'azul':
+      case 'blue':
         return 'bg-blue-500'
       default:
         return 'bg-slate-400'
@@ -340,7 +410,7 @@ export default function App() {
   }
 
   const maskPatientName = (nameString: string) => {
-    if (!nameString) return 'Paciente'
+    if (!nameString) return activeIdioma === 'en' ? 'Patient' : 'Paciente'
     const parts = nameString.split(' ')
     if (parts.length === 1) {
       return nameString.substring(0, 3) + '***'
@@ -389,7 +459,7 @@ export default function App() {
     const chunks = audioChunksRef.current
     audioChunksRef.current = []
     if (chunks.length === 0) {
-      triggerToast('Nenhum áudio capturado. Use o campo de texto.')
+      triggerToast(tr('Nenhum áudio capturado. Use o campo de texto.'))
       return
     }
     setIsTranscribing(true)
@@ -398,11 +468,14 @@ export default function App() {
       const audioBase64 = await blobToWavBase64(blob)
       const result = await transcribeMutation.mutateAsync({
         audioBase64,
-        formato: 'wav'
+        formato: 'wav',
+        idioma: activeIdioma
       })
       const texto = result.texto.trim()
       if (!texto) {
-        triggerToast('Não consegui entender o áudio. Tente novamente ou digite.')
+        triggerToast(
+          tr('Não consegui entender o áudio. Tente novamente ou digite.')
+        )
         return
       }
       setAudioTranscript(texto)
@@ -411,12 +484,12 @@ export default function App() {
         text: prev.text ? `${prev.text} ${texto}`.trim() : texto,
         audioLogged: true
       }))
-      triggerToast('Transcrição pronta — revise e edite se precisar.')
+      triggerToast(tr('Transcrição pronta — revise e edite se precisar.'))
     } catch (error) {
       triggerToast(
         error instanceof Error
           ? error.message
-          : 'Falha na transcrição. Use o campo de texto.'
+          : tr('Falha na transcrição. Use o campo de texto.')
       )
     } finally {
       setIsTranscribing(false)
@@ -428,7 +501,9 @@ export default function App() {
       !navigator.mediaDevices?.getUserMedia ||
       typeof MediaRecorder === 'undefined'
     ) {
-      triggerToast('Gravação por voz não suportada aqui. Use o campo de texto.')
+      triggerToast(
+        tr('Gravação por voz não suportada aqui. Use o campo de texto.')
+      )
       return
     }
     try {
@@ -449,7 +524,9 @@ export default function App() {
       setIsRecording(true)
     } catch {
       stopMediaStream()
-      triggerToast('Não foi possível acessar o microfone. Use o campo de texto.')
+      triggerToast(
+        tr('Não foi possível acessar o microfone. Use o campo de texto.')
+      )
     }
   }
 
@@ -476,7 +553,7 @@ export default function App() {
   }
 
   const togglePlayAudio = () => {
-    triggerToast('Reprodução indisponível sem uma gravação real.')
+    triggerToast(tr('Reprodução indisponível sem uma gravação real.'))
   }
 
   // Call the analytical AI API
@@ -484,7 +561,9 @@ export default function App() {
     const finalQuery = symptoms.text.trim()
     if (!finalQuery) {
       triggerToast(
-        'Por favor, relate o que está sentindo por texto ou áudio antes de prosseguir.'
+        tr(
+          'Por favor, relate o que está sentindo por texto ou áudio antes de prosseguir.'
+        )
       )
       return
     }
@@ -493,6 +572,7 @@ export default function App() {
 
     try {
       const payload = AnalisarRelatoRequestSchema.parse({
+        idioma: activeIdioma,
         paciente: {
           nome: patient.name,
           idade: patient.age,
@@ -522,7 +602,7 @@ export default function App() {
       setAiErrorMessage(
         error instanceof Error
           ? error.message
-          : 'Serviço de IA indisponível no momento.'
+          : tr('Serviço de IA indisponível no momento.')
       )
       setQuotaAction('analyze')
       setShowQuotaModal(true)
@@ -550,7 +630,12 @@ export default function App() {
   const resolvePainLevel = (): number | undefined => {
     const painAnswer = answers.find(answer => {
       const question = adaptiveQuestions.find(q => q.id === answer.perguntaId)
-      return answer.tipo === 'escala' && /dor|intensidade/i.test(question?.pergunta || '')
+      return (
+        answer.tipo === 'escala' &&
+        /dor|intensidade|pain|severity|intensity/i.test(
+          question?.pergunta || ''
+        )
+      )
     })
     return painAnswer?.tipo === 'escala' ? painAnswer.valor : painLevel
   }
@@ -567,7 +652,9 @@ export default function App() {
     )
     if (missingRequired.length > 0) {
       triggerToast(
-        `Responda as ${missingRequired.length} pergunta(s) obrigatória(s) antes de continuar.`
+        activeIdioma === 'en'
+          ? `Answer the ${missingRequired.length} required question(s) before continuing.`
+          : `Responda as ${missingRequired.length} pergunta(s) obrigatória(s) antes de continuar.`
       )
       setStep(4)
       return
@@ -578,6 +665,7 @@ export default function App() {
     try {
       const payload = ClassificarRequestSchema.parse({
         sessaoId: sessionId,
+        idioma: activeIdioma,
         paciente: {
           nome: patient.name,
           idade: patient.age,
@@ -604,7 +692,7 @@ export default function App() {
       setAiErrorMessage(
         error instanceof Error
           ? error.message
-          : 'Serviço de IA indisponível no momento.'
+          : tr('Serviço de IA indisponível no momento.')
       )
       setQuotaAction('classify')
       setShowQuotaModal(true)
@@ -632,16 +720,32 @@ export default function App() {
   // Pain indicator description resolver
   const getPainDescriptor = (level: number) => {
     if (level === 0)
-      return { emoji: '😊', text: 'Sem dor', color: 'text-slate-400' }
+      return {
+        emoji: '😊',
+        text: activeIdioma === 'en' ? 'No pain' : 'Sem dor',
+        color: 'text-slate-400'
+      }
     if (level <= 3)
-      return { emoji: '😐', text: 'Leve', color: 'text-emerald-500' }
+      return {
+        emoji: '😐',
+        text: activeIdioma === 'en' ? 'Mild' : 'Leve',
+        color: 'text-emerald-500'
+      }
     if (level <= 6)
-      return { emoji: '🙁', text: 'Moderada', color: 'text-yellow-500' }
+      return {
+        emoji: '🙁',
+        text: activeIdioma === 'en' ? 'Moderate' : 'Moderada',
+        color: 'text-yellow-500'
+      }
     if (level <= 8)
-      return { emoji: '😢', text: 'Forte', color: 'text-orange-500' }
+      return {
+        emoji: '😢',
+        text: activeIdioma === 'en' ? 'Severe' : 'Forte',
+        color: 'text-orange-500'
+      }
     return {
       emoji: '😭',
-      text: 'Insuportável',
+      text: activeIdioma === 'en' ? 'Unbearable' : 'Insuportável',
       color: 'text-red-500 font-extrabold'
     }
   }
@@ -725,15 +829,7 @@ export default function App() {
   }
 
   // Reset the entire questionnaire for testing again
-  const handleResetApp = () => {
-    if (
-      (patient.name || symptoms.text || sessionId) &&
-      !window.confirm(
-        'Recomeçar apagará os dados desta pré-triagem. Deseja continuar?'
-      )
-    ) {
-      return
-    }
+  const resetSessionState = () => {
     setStep(1)
     setPatient({ name: '', age: 41, sex: '' })
     setAgeConfirmed(false)
@@ -756,7 +852,44 @@ export default function App() {
     })
     setResult(null)
     setAppointmentConfirmed(false)
-    triggerToast('Iniciando nova triagem limpa!')
+  }
+
+  const handleResetApp = () => {
+    if (
+      (patient.name || symptoms.text || sessionId) &&
+      !window.confirm(
+        tr('Recomeçar apagará os dados desta pré-triagem. Deseja continuar?')
+      )
+    ) {
+      return
+    }
+    resetSessionState()
+    triggerToast(tr('Iniciando nova triagem limpa!'))
+  }
+
+  const selectLanguage = (nextIdioma: Idioma) => {
+    void i18n.changeLanguage(nextIdioma)
+    setIdioma(nextIdioma)
+  }
+
+  const handleLanguageChange = (nextIdioma: Idioma) => {
+    if (nextIdioma === activeIdioma) return
+    if (
+      (patient.name || symptoms.text || sessionId) &&
+      !window.confirm(
+        tr(
+          'Alterar o idioma apagará os dados desta pré-triagem. Deseja continuar?'
+        )
+      )
+    ) {
+      return
+    }
+    resetSessionState()
+    selectLanguage(nextIdioma)
+  }
+
+  if (!idioma) {
+    return <LanguageGate onSelect={selectLanguage} />
   }
 
   return (
@@ -764,6 +897,28 @@ export default function App() {
       data-theme={isDarkMode ? 'night' : 'light'}
       className="min-h-screen bg-base-200 text-base-content font-sans transition-colors duration-200 flex flex-col justify-between"
     >
+      <div className="fixed right-4 top-4 z-40 flex items-center gap-1 rounded-full border border-base-300 bg-base-100/95 p-1 shadow-lg backdrop-blur">
+        {(['pt-BR', 'en'] as const).map(option => (
+          <button
+            key={option}
+            type="button"
+            aria-label={
+              option === 'pt-BR'
+                ? 'Alterar idioma para português'
+                : 'Change language to English'
+            }
+            className={`rounded-full px-3 py-1.5 text-xs font-black transition ${
+              activeIdioma === option
+                ? 'bg-primary text-primary-content'
+                : 'text-base-content/60 hover:bg-base-200'
+            }`}
+            onClick={() => handleLanguageChange(option)}
+          >
+            {option === 'pt-BR' ? 'PT' : 'EN'}
+          </button>
+        ))}
+      </div>
+
       {/* Toast Notification */}
       {customToast && (
         <div
@@ -832,7 +987,9 @@ export default function App() {
                   className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest"
                   id="step_indicator_label"
                 >
-                  Passo {step} de 6
+                  {activeIdioma === 'en'
+                    ? `Step ${step} of 6`
+                    : `Passo ${step} de 6`}
                 </span>
                 <span
                   className="text-xs text-blue-500 font-semibold"
@@ -1327,7 +1484,10 @@ export default function App() {
                           {s.rotulo || s}
                         </span>
                       ))
-                    : extractSymptomKeywordsFromText(symptoms.text).map(
+                    : extractSymptomKeywordsFromText(
+                        symptoms.text,
+                        activeIdioma
+                      ).map(
                         (k: string, idx: number) => (
                           <span
                             key={idx}
@@ -1338,8 +1498,10 @@ export default function App() {
                         )
                       )}
                   {(!detectedSymptoms || detectedSymptoms.length === 0) &&
-                    extractSymptomKeywordsFromText(symptoms.text).length ===
-                      0 && (
+                    extractSymptomKeywordsFromText(
+                      symptoms.text,
+                      activeIdioma
+                    ).length === 0 && (
                       <span className="px-3.5 py-1.5 bg-primary/10 text-primary border border-primary/20 text-xs font-semibold rounded-full uppercase tracking-wider">
                         Processando relato...
                       </span>
@@ -1401,7 +1563,9 @@ export default function App() {
                     >
                       <div className="flex justify-between items-start gap-3">
                         <span className="bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-300 text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider">
-                          Pergunta {qIdx + 1} de {adaptiveQuestions.length}
+                          {activeIdioma === 'en'
+                            ? `Question ${qIdx + 1} of ${adaptiveQuestions.length}`
+                            : `Pergunta ${qIdx + 1} de ${adaptiveQuestions.length}`}
                         </span>
                         {currentAnswerVal !== null &&
                           currentAnswerVal !== '' &&
@@ -1619,7 +1783,9 @@ export default function App() {
                     )
                     if (missing.length > 0) {
                       triggerToast(
-                        `Responda as ${missing.length} pergunta(s) obrigatória(s).`
+                        activeIdioma === 'en'
+                          ? `Answer the ${missing.length} required question(s).`
+                          : `Responda as ${missing.length} pergunta(s) obrigatória(s).`
                       )
                       return
                     }
@@ -1660,7 +1826,9 @@ export default function App() {
                         bloodPressure: '',
                         saturation: ''
                       })
-                      triggerToast('Você optou por ignorar os sinais vitais.')
+                      triggerToast(
+                        tr('Você optou por ignorar os sinais vitais.')
+                      )
                     }}
                     className="text-xs text-blue-500 hover:underline font-bold"
                   >
@@ -2188,7 +2356,11 @@ export default function App() {
                         Classificação de Risco
                       </span>
                       <h2 className="text-2xl font-black text-slate-900 dark:text-white uppercase leading-tight">
-                        {MANCHESTER[result.classificacao.nivel].rotulo}
+                        {
+                          MANCHESTER_ROTULOS[activeIdioma][
+                            result.classificacao.nivel
+                          ]
+                        }
                       </h2>
                     </div>
 
@@ -2390,7 +2562,7 @@ export default function App() {
                               <CalendarClock className="w-3.5 h-3.5 shrink-0" />
                               {new Date(
                                 result.agendamento.proximoSlot
-                              ).toLocaleString('pt-BR', {
+                              ).toLocaleString(activeIdioma, {
                                 day: '2-digit',
                                 month: '2-digit',
                                 hour: '2-digit',
@@ -2417,7 +2589,11 @@ export default function App() {
                             <button
                               onClick={() => {
                                 setAppointmentConfirmed(true)
-                                triggerToast('Encaixe confirmado.')
+                                triggerToast(
+                                  activeIdioma === 'en'
+                                    ? 'Appointment confirmed.'
+                                    : 'Encaixe confirmado.'
+                                )
                               }}
                               className="w-full btn btn-primary text-primary-content font-extrabold h-12 rounded-2xl text-sm flex items-center justify-center gap-2"
                             >
@@ -2567,7 +2743,9 @@ export default function App() {
                         {patient.name || 'Paciente Triado'}
                       </h3>
                       <p className="text-xs text-slate-400 dark:text-slate-500 font-bold">
-                        {patient.age} anos • Sintomas Enviados
+                        {activeIdioma === 'en'
+                          ? `${patient.age} years old • Symptoms submitted`
+                          : `${patient.age} anos • Sintomas enviados`}
                       </p>
                     </div>
 
@@ -2578,7 +2756,10 @@ export default function App() {
                           ⚠️ ATENDIMENTO IMEDIATO
                         </span>
                         <p className="text-[11px] text-red-700 dark:text-red-300 leading-relaxed font-semibold font-sans">
-                          Seu caso é crítico <b>({myQueueItem.title})</b>.
+                          Seu caso é crítico{' '}
+                          <b>
+                            ({MANCHESTER_ROTULOS[activeIdioma][myQueueItem.nivel]})
+                          </b>
                           Dirija-se imediatamente aos profissionais do balcão!
                           Você é prioritário.
                         </p>
@@ -2589,7 +2770,10 @@ export default function App() {
                           ⚠️ ATENDIMENTO PRIORITÁRIO
                         </span>
                         <p className="text-[11px] text-orange-700 dark:text-orange-300 leading-relaxed font-semibold font-sans">
-                          Seu caso é muito urgente <b>({myQueueItem.title})</b>.
+                          Seu caso é muito urgente{' '}
+                          <b>
+                            ({MANCHESTER_ROTULOS[activeIdioma][myQueueItem.nivel]})
+                          </b>
                           Dirija-se imediatamente aos profissionais do balcão.
                         </p>
                       </div>
@@ -2603,11 +2787,10 @@ export default function App() {
                           fila. Tempo sugerido:{' '}
                           <b>
                             {result?.esperaEstimada
-                              ? result.esperaEstimada.min +
-                                '-' +
-                                result.esperaEstimada.max +
-                                ' min'
-                              : 'Aguarde'}
+                              ? `${result.esperaEstimada.min}-${result.esperaEstimada.max} min`
+                              : activeIdioma === 'en'
+                                ? 'Please wait'
+                                : 'Aguarde'}
                           </b>
                           .
                         </p>
@@ -2623,7 +2806,9 @@ export default function App() {
                         <span
                           className={`font-black uppercase tracking-wider truncate ${myQueueItem?.color === 'red' ? 'text-red-500' : myQueueItem?.color === 'orange' ? 'text-orange-500' : myQueueItem?.color === 'yellow' ? 'text-yellow-600' : 'text-emerald-500'}`}
                         >
-                          {myQueueItem?.title.split(' - ')[0]}
+                          {myQueueItem
+                            ? MANCHESTER_ROTULOS[activeIdioma][myQueueItem.nivel]
+                            : ''}
                         </span>
                       </div>
                       <div className="flex justify-between items-center text-[11px] gap-2">
@@ -2753,7 +2938,7 @@ export default function App() {
                                       className={`text-sm font-bold truncate ${isCurrentUser ? 'text-primary font-black' : 'text-base-content'}`}
                                     >
                                       {isCurrentUser
-                                        ? `${patient.name} (Você)`
+                                        ? `${patient.name} (${activeIdioma === 'en' ? 'You' : 'Você'})`
                                         : maskPatientName(queuePatient.name)}
                                     </span>
                                     {isCurrentUser && (
@@ -2763,8 +2948,13 @@ export default function App() {
                                     )}
                                   </div>
                                   <p className="text-[11px] text-slate-500 truncate mt-0.5">
-                                    {queuePatient.age} anos •{' '}
-                                    {queuePatient.title}
+                                    {queuePatient.age}{' '}
+                                    {activeIdioma === 'en' ? 'years old' : 'anos'} •{' '}
+                                    {
+                                      MANCHESTER_ROTULOS[activeIdioma][
+                                        queuePatient.nivel
+                                      ]
+                                    }
                                   </p>
                                 </div>
                               </div>
@@ -2789,7 +2979,9 @@ export default function App() {
                                       Aguardando
                                     </span>
                                     <span className="text-[9px] text-slate-400 mt-1">
-                                      Posição: #{queuePatient.position}
+                                      {activeIdioma === 'en'
+                                        ? `Position: #${queuePatient.position}`
+                                        : `Posição: #${queuePatient.position}`}
                                     </span>
                                   </div>
                                 )}
@@ -2836,7 +3028,9 @@ export default function App() {
                 onClick={() => {
                   setIsDarkMode(!isDarkMode)
                   triggerToast(
-                    `Modo ${!isDarkMode ? 'Escuro' : 'Claro'} Ativado.`
+                    activeIdioma === 'en'
+                      ? `${!isDarkMode ? 'Dark' : 'Light'} mode enabled.`
+                      : `Modo ${!isDarkMode ? 'Escuro' : 'Claro'} ativado.`
                   )
                 }}
                 className="p-2.5 rounded-full bg-base-200 border border-base-300 text-slate-600 dark:text-slate-300 hover:bg-base-300 transition cursor-pointer"

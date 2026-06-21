@@ -12,6 +12,7 @@ function session(
 ): SessaoTriagem {
   return {
     sessaoId,
+    idioma: 'pt-BR',
     paciente: {
       nome,
       idade: 40,
@@ -25,6 +26,7 @@ function session(
     versaoModeloColetor: 'qwen3.6-flash',
     resultado: {
       sessaoId,
+      idioma: 'pt-BR',
       classificacao: {
         nivel,
         confianca: 0.8,
@@ -60,6 +62,7 @@ describe('TriageQueueService', () => {
     const result = await queue.getSortedQueue()
 
     expect(result[0].sessaoId).toBe('yellow')
+    expect(result[0].nivel).toBe('amarelo')
     expect(result[0].nomeMascarado).toBe('João S***')
     expect(result[0].name).toBe('João S***')
     expect(result.some(patient => patient.nomeMascarado === 'Maria da Silva')).toBe(

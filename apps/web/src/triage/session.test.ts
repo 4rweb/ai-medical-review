@@ -7,6 +7,7 @@ describe('estado da sessão de triagem', () => {
       type: 'analysis',
       value: {
         sessaoId: 'session-123',
+        idioma: 'pt-BR',
         sintomasIdentificados: [{ rotulo: 'cefaleia' }],
         redFlags: [
           {
@@ -32,6 +33,7 @@ describe('estado da sessão de triagem', () => {
     })
 
     expect(state.sessaoId).toBe('session-123')
+    expect(state.idioma).toBe('pt-BR')
     expect(state.redFlags).toHaveLength(1)
     expect(state.alertaEmergencia).toBeDefined()
     expect(state.versaoModeloColetor).toBe('qwen3.6-flash')
@@ -53,6 +55,7 @@ describe('estado da sessão de triagem', () => {
       obrigatoria: true
     }
     expect(descricaoResposta(question)).toBe('Não respondido')
+    expect(descricaoResposta(question, undefined, 'en')).toBe('Not answered')
     expect(
       descricaoResposta(question, {
         perguntaId: 'q1',
@@ -60,5 +63,16 @@ describe('estado da sessão de triagem', () => {
         valor: false
       })
     ).toBe('Não')
+    expect(
+      descricaoResposta(
+        question,
+        {
+          perguntaId: 'q1',
+          tipo: 'sim_nao',
+          valor: false
+        },
+        'en'
+      )
+    ).toBe('No')
   })
 })

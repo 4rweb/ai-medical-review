@@ -15,6 +15,7 @@ import { TriageService } from './triage.service'
 
 const input: ClassificarRequest = {
   sessaoId: 'session-1',
+  idioma: 'pt-BR',
   paciente: {
     nome: 'Paciente Teste',
     idade: 40,
@@ -144,5 +145,92 @@ describe('TriageService', () => {
       local: 'Consultório 7 - Ala A',
       proximoSlot: '2026-06-20T12:45:00.000Z'
     })
+  })
+
+  it('gera coleta e conteúdo determinístico em inglês', async () => {
+    const generateJson = vi.fn().mockResolvedValue({
+      sessaoId: 'english-session',
+      idioma: 'en',
+      sintomasIdentificados: [{ rotulo: 'Sore throat' }],
+      redFlags: [],
+      perguntas: [
+        {
+          id: 'fever',
+          tipo: 'sim_nao',
+          pergunta: 'Do you have a fever?',
+          obrigatoria: true
+        }
+      ],
+      versaoModelo: 'qwen3.6-flash'
+    })
+    const service = new TriageService(
+      { generateJson } as unknown as QwenService,
+      new ClinicalSafetyService(),
+      new ClinicalToolsGatewayService(
+        new ConfigService({ MCP_ENABLED: 'false' }),
+        new ClinicalToolsService()
+      ),
+      new AuditService(null),
+      new ConfigService({ QWEN_MODEL: 'qwen3.6-flash' })
+    )
+
+    const result = await service.analyze({
+      idioma: 'en',
+      paciente: {
+        nome: 'Patient Test',
+        idade: 40,
+        consentimentoLGPD: true
+      },
+      relato: { texto: 'Mild sore throat for two days.', origem: 'texto' }
+    })
+
+    expect(result.idioma).toBe('en')
+    expect(result.perguntas[0].pergunta).toBe('Do you have a fever?')
+    expect(generateJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system: expect.stringContaining('questions in English'),
+        prompt: expect.stringContaining('Output language: English')
+      })
+    )
+  })
+
+  it('rejeita resposta do coletor em locale diferente do solicitado', async () => {
+    const generateJson = vi.fn().mockResolvedValue({
+      sessaoId: 'wrong-locale',
+      idioma: 'pt-BR',
+      sintomasIdentificados: [],
+      redFlags: [],
+      perguntas: [
+        {
+          id: 'fever',
+          tipo: 'sim_nao',
+          pergunta: 'Você está com febre?',
+          obrigatoria: true
+        }
+      ],
+      versaoModelo: 'qwen3.6-flash'
+    })
+    const service = new TriageService(
+      { generateJson } as unknown as QwenService,
+      new ClinicalSafetyService(),
+      new ClinicalToolsGatewayService(
+        new ConfigService({ MCP_ENABLED: 'false' }),
+        new ClinicalToolsService()
+      ),
+      new AuditService(null),
+      new ConfigService({ QWEN_MODEL: 'qwen3.6-flash' })
+    )
+
+    await expect(
+      service.analyze({
+        idioma: 'en',
+        paciente: {
+          nome: 'Patient Test',
+          idade: 40,
+          consentimentoLGPD: true
+        },
+        relato: { texto: 'Mild sore throat for two days.', origem: 'texto' }
+      })
+    ).rejects.toMatchObject({ status: 502 })
   })
 })

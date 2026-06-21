@@ -14,8 +14,9 @@ import {
   AnalisarRelatoResponseSchema,
   ClassificacaoModeloSchema,
   ClassificarRequestSchema,
+  DISCLAIMER_POR_IDIOMA,
   MANCHESTER,
-  RECOMENDACOES_POR_NIVEL,
+  RECOMENDACOES_POR_IDIOMA,
   type AnalisarRelatoRequest,
   type AnalisarRelatoResponse,
   type ClassificarRequest,
@@ -31,8 +32,9 @@ import {
 } from '../qwen/qwen.errors'
 import { ClinicalSafetyService } from './clinical-safety.service'
 import { ClinicalToolsGatewayService } from './clinical-tools-gateway.service'
-import { CLASSIFIER_SYSTEM_PROMPT } from './manchester-grounding'
+import { getClassifierSystemPrompt } from './manchester-grounding'
 import { AuditService } from '../db/audit.service'
+import { publicMessage } from './triage-i18n'
 
 @Injectable()
 export class TriageService {
@@ -61,13 +63,18 @@ export class TriageService {
         model: this.collectorModel,
         schemaName: 'analisar_relato',
         schema: AnalisarRelatoResponseSchema,
-        system:
-          'Você é um agente coletor de pré-triagem. Não diagnostique. Extraia somente dados relatados, gere perguntas objetivas e retorne exclusivamente um objeto JSON válido aderente ao schema fornecido.',
+        system: this.getCollectorSystemPrompt(dto.idioma),
         prompt: this.buildCollectorPrompt(dto)
       })
+      if (response.idioma !== dto.idioma) {
+        throw new QwenInvalidResponseError(
+          `Idioma incompatível: esperado ${dto.idioma}, recebido ${response.idioma}.`
+        )
+      }
 
       const deterministic = this.safety.evaluate({
         sessaoId: response.sessaoId,
+        idioma: dto.idioma,
         paciente: dto.paciente,
         relato: dto.relato,
         sintomasIdentificados: response.sintomasIdentificados,
@@ -80,6 +87,7 @@ export class TriageService {
       return {
         ...response,
         sessaoId: response.sessaoId || randomUUID(),
+        idioma: dto.idioma,
         redFlags: [
           ...new Map(
             [...response.redFlags, ...deterministic.flags].map(flag => [
@@ -91,15 +99,17 @@ export class TriageService {
         alertaEmergencia:
           response.alertaEmergencia ||
           (deterministic.requiredLevel === 'vermelho'
-            ? {
-                motivo: deterministic.flags[0]?.descricao || 'Sinal crítico',
-                acao: 'Procure imediatamente a equipe de triagem ou ligue para o SAMU 192.'
+              ? {
+                motivo:
+                  deterministic.flags[0]?.descricao ||
+                  publicMessage(dto.idioma, 'criticalSignal'),
+                acao: publicMessage(dto.idioma, 'emergencyAction')
               }
             : undefined),
         versaoModelo: this.collectorModel
       }
     } catch (error) {
-      this.rethrowAiError(error)
+      this.rethrowAiError(error, dto.idioma)
     }
   }
 
@@ -135,7 +145,8 @@ export class TriageService {
       const fallbackAppointment =
         !parsedAppointment.success && safe.classificacao.nivel !== 'vermelho'
           ? await this.clinicalTools.buscarDisponibilidadeConsultorio(
-              this.getFallbackSpecialty()
+              this.getFallbackSpecialty(dto.idioma),
+              dto.idioma
             )
           : undefined
       const resolvedAppointment = parsedAppointment.success
@@ -144,17 +155,18 @@ export class TriageService {
 
       return {
         sessaoId: dto.sessaoId,
+        idioma: dto.idioma,
         classificacao: safe.classificacao,
         esperaEstimada: {
           min: metadata.esperaMin,
           max: metadata.esperaMax,
           unidade: 'min'
         },
-        recomendacoes: RECOMENDACOES_POR_NIVEL[safe.classificacao.nivel],
+        recomendacoes:
+          RECOMENDACOES_POR_IDIOMA[dto.idioma][safe.classificacao.nivel],
         redFlags: safe.redFlags,
         emergencia: safe.emergencia,
-        disclaimer:
-          'Pré-triagem para apoio à organização do atendimento. Não é diagnóstico e não substitui avaliação presencial.',
+        disclaimer: DISCLAIMER_POR_IDIOMA[dto.idioma],
         geradoEm: new Date().toISOString(),
         versaoModelo: this.classifierModel,
         ...(resolvedAppointment ? { agendamento: resolvedAppointment } : {}),
@@ -166,7 +178,7 @@ export class TriageService {
         }
       }
     } catch (error) {
-      this.rethrowAiError(error)
+      this.rethrowAiError(error, dto.idioma)
     }
   }
 
@@ -175,9 +187,9 @@ export class TriageService {
       model: this.classifierModel,
       schemaName: 'classificar_triagem',
       schema: ClassificacaoModeloSchema,
-      system: CLASSIFIER_SYSTEM_PROMPT,
+      system: getClassifierSystemPrompt(dto.idioma),
       prompt: this.buildClassifierPrompt(dto),
-      tools: this.clinicalTools.getQwenTools()
+      tools: this.clinicalTools.getQwenTools(dto.idioma)
     }
 
     try {
@@ -200,13 +212,15 @@ export class TriageService {
     }
   }
 
-  private rethrowAiError(error: unknown): never {
+  private rethrowAiError(
+    error: unknown,
+    idioma: AnalisarRelatoRequest['idioma']
+  ): never {
     if (error instanceof QwenQuotaError) {
       throw new HttpException(
         {
           error: AI_ERROR_CODES.quota,
-          message:
-            'A cota do serviço de IA foi atingida. Tente novamente mais tarde.'
+          message: publicMessage(idioma, 'aiQuota')
         },
         HttpStatus.TOO_MANY_REQUESTS
       )
@@ -214,14 +228,13 @@ export class TriageService {
     if (error instanceof QwenInvalidResponseError) {
       throw new BadGatewayException({
         error: AI_ERROR_CODES.invalid,
-        message:
-          'A IA retornou uma resposta inválida. Nenhuma análise foi criada.'
+        message: publicMessage(idioma, 'aiInvalid')
       })
     }
     if (error instanceof QwenUnavailableError) {
       throw new ServiceUnavailableException({
         error: AI_ERROR_CODES.unavailable,
-        message: 'Serviço de IA indisponível no momento.'
+        message: publicMessage(idioma, 'aiUnavailable')
       })
     }
     throw error
@@ -234,20 +247,75 @@ export class TriageService {
     )
   }
 
-  private getFallbackSpecialty(): string {
-    return 'Clínica médica'
+  private getFallbackSpecialty(idioma: AnalisarRelatoRequest['idioma']): string {
+    return publicMessage(idioma, 'fallbackSpecialty')
   }
 
   private buildCollectorPrompt(dto: AnalisarRelatoRequest): string {
+    if (dto.idioma === 'en') {
+      return `Patient report: ${JSON.stringify(dto.relato.texto)}
+Age: ${dto.paciente.idade}
+Biological sex: ${dto.paciente.sexoBiologico || 'not reported'}
+Output language: English (en)
+
+Extract symptoms and warning signs without inventing information.
+Generate 4 to 6 clinically relevant adaptive questions in English.
+Every required question must allow an objective answer.
+Use short, stable IDs and locale-independent option values.
+Create a UUID sessaoId.
+Set idioma to "en".
+versaoModelo must be "${this.collectorModel}".
+If the report already contains a critical warning sign, fill alertaEmergencia
+with instructions to seek the triage team or call SAMU at 192.
+Do not use diagnostic language.
+
+Return a complete JSON object with this structure:
+{
+  "sessaoId": "UUID",
+  "idioma": "en",
+  "sintomasIdentificados": [
+    { "rotulo": "string", "inicio": "subito", "localizacao": "string" }
+  ],
+  "redFlags": [
+    { "codigo": "stable_code", "descricao": "English text", "severidade": "alta" }
+  ],
+  "perguntas": [
+    {
+      "id": "stable_id",
+      "tipo": "sim_nao",
+      "pergunta": "English text",
+      "obrigatoria": true,
+      "motivo": "optional English text",
+      "pesoClinico": "alto",
+      "opcoes": [
+        { "valor": "stable_value", "rotulo": "English text", "sinaliza": "alerta" }
+      ],
+      "escala": { "min": 0, "max": 10 }
+    }
+  ],
+  "alertaEmergencia": { "motivo": "English text", "acao": "English text" },
+  "versaoModelo": "${this.collectorModel}"
+}
+
+Structure rules:
+- sintomasIdentificados, redFlags and perguntas are always arrays;
+- use [] when there are no identifiable symptoms or red flags;
+- perguntas must contain 4 to 6 items;
+- opcoes exists only for escolha_unica or multipla_escolha;
+- escala exists only for escala questions;
+- omit alertaEmergencia when there is no emergency; do not use null.`
+    }
     return `Relato do paciente: ${JSON.stringify(dto.relato.texto)}
 Idade: ${dto.paciente.idade}
 Sexo biológico: ${dto.paciente.sexoBiologico || 'não informado'}
+Idioma de saída: Português do Brasil (pt-BR)
 
 Extraia sintomas e sinais de alerta sem inventar informações.
 Gere de 4 a 6 perguntas adaptativas clinicamente relevantes.
 Toda pergunta obrigatória deve permitir resposta objetiva.
 Use IDs curtos e estáveis.
 Crie um sessaoId UUID.
+Defina idioma como "pt-BR".
 versaoModelo deve ser "${this.collectorModel}".
 Se o relato já contiver sinal crítico, preencha alertaEmergencia com orientação para procurar a equipe ou ligar 192.
 Não use linguagem diagnóstica.
@@ -255,6 +323,7 @@ Não use linguagem diagnóstica.
 Retorne um objeto JSON completo nesta estrutura:
 {
   "sessaoId": "UUID",
+  "idioma": "pt-BR",
   "sintomasIdentificados": [
     {
       "rotulo": "string",
@@ -315,6 +384,40 @@ Regras da estrutura:
       }
     })
 
+    if (dto.idioma === 'en') {
+      return `Classify only the pre-triage priority.
+
+Data:
+${JSON.stringify(
+  {
+    age: dto.paciente.idade,
+    biologicalSex: dto.paciente.sexoBiologico,
+    report: dto.relato.texto,
+    symptoms: dto.sintomasIdentificados,
+    collectorRedFlags: dto.redFlagsColetor,
+    answers,
+    painLevel: dto.nivelDor ?? 'not reported',
+    vitalSigns: dto.sinaisVitais ?? 'not reported'
+  },
+  null,
+  2
+)}
+
+Write justificativa, fatoresDeterminantes and red flag descriptions in English.
+Do not mention probable diagnoses, tests, medication, fasting or treatment.
+Explain priority using only the supplied data.
+Determinant factors must contain only facts that changed priority.
+For every reported vital sign, call verificarFaixaVital before concluding.
+If the case is not red, call buscarDisponibilidadeConsultorio once using the
+most appropriate specialty in English. Do not invent availability in the JSON;
+the backend uses the tool result directly.
+You MUST execute at least one tool before returning the classification.
+When no vital signs are provided, execute buscarDisponibilidadeConsultorio.
+
+Return a complete JSON object with the required classification structure.
+redFlags must be [] when no red flag is identified.`
+    }
+
     return `Classifique somente a prioridade de pré-triagem.
 
 Dados:
@@ -362,5 +465,13 @@ Retorne um objeto JSON completo nesta estrutura:
 }
 
 redFlags deve ser [] quando nenhuma red flag for identificada.`
+  }
+
+  private getCollectorSystemPrompt(
+    idioma: AnalisarRelatoRequest['idioma']
+  ): string {
+    return idioma === 'en'
+      ? 'You are a pre-triage intake agent. Do not diagnose. Extract only reported data, generate objective questions in English, and return only a valid JSON object that follows the provided schema.'
+      : 'Você é um agente coletor de pré-triagem. Não diagnostique. Extraia somente dados relatados, gere perguntas objetivas em português e retorne exclusivamente um objeto JSON válido aderente ao schema fornecido.'
   }
 }

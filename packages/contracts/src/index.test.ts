@@ -21,6 +21,23 @@ describe('contratos de triagem', () => {
     expect(parsed.success).toBe(false)
   })
 
+  it('exige locale suportado nas chamadas de IA', () => {
+    const base = {
+      paciente: {
+        nome: 'Patient Test',
+        idade: 40,
+        consentimentoLGPD: true
+      },
+      relato: { texto: 'Mild sore throat.', origem: 'texto' }
+    }
+    expect(
+      AnalisarRelatoRequestSchema.safeParse({ ...base, idioma: 'en' }).success
+    ).toBe(true)
+    expect(
+      AnalisarRelatoRequestSchema.safeParse({ ...base, idioma: 'es' }).success
+    ).toBe(false)
+  })
+
   it('distingue pergunta sem resposta de resposta booleana false', () => {
     const question: PerguntaAdaptativa = {
       id: 'q1',
@@ -50,6 +67,7 @@ describe('contratos de triagem', () => {
   it('aceita alerta de emergência nulo retornado pela IA', () => {
     const parsed = AnalisarRelatoResponseSchema.safeParse({
       sessaoId: 'session-1',
+      idioma: 'pt-BR',
       sintomasIdentificados: [],
       redFlags: [],
       perguntas: [
@@ -70,6 +88,7 @@ describe('contratos de triagem', () => {
   it('valida auditoria final e agendamento tipado', () => {
     const parsed = ClassificarResponseSchema.safeParse({
       sessaoId: 'session-1',
+      idioma: 'pt-BR',
       classificacao: {
         nivel: 'verde',
         confianca: 0.8,

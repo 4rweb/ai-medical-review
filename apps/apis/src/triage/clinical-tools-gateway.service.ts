@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { AvailabilityResult } from '@medical/clinical'
+import type { Idioma } from '@medical/contracts'
 import type { QwenTool } from '../qwen/qwen.types'
 import { ClinicalToolsService } from './clinical-tools.service'
 
@@ -107,10 +108,14 @@ export class ClinicalToolsGatewayService implements OnModuleDestroy {
     )
   }
 
-  getQwenTools(): QwenTool[] {
-    return this.localTools.getQwenTools().map(tool => ({
+  getQwenTools(idioma: Idioma = 'pt-BR'): QwenTool[] {
+    return this.localTools.getQwenTools(idioma).map(tool => ({
       ...tool,
-      execute: input => this.execute(tool, input)
+      execute: input =>
+        this.execute(tool, {
+          ...(input as Record<string, unknown>),
+          idioma
+        })
     }))
   }
 
@@ -127,17 +132,24 @@ export class ClinicalToolsGatewayService implements OnModuleDestroy {
   }
 
   async buscarDisponibilidadeConsultorio(
-    especialidade: string
+    especialidade: string,
+    idioma: Idioma = 'pt-BR'
   ): Promise<AvailabilityResult> {
     const tool = this.localTools
-      .getQwenTools()
+      .getQwenTools(idioma)
       .find(candidate => candidate.name === 'buscarDisponibilidadeConsultorio')
 
     if (!tool) {
-      return this.localTools.buscarDisponibilidadeConsultorio(especialidade)
+      return this.localTools.buscarDisponibilidadeConsultorio(
+        especialidade,
+        idioma
+      )
     }
 
-    return (await this.execute(tool, { especialidade })) as AvailabilityResult
+    return (await this.execute(tool, {
+      especialidade,
+      idioma
+    })) as AvailabilityResult
   }
 
   async onModuleDestroy(): Promise<void> {

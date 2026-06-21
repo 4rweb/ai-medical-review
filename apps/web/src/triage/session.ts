@@ -10,7 +10,8 @@ import type {
   RespostaAdaptativa,
   SessaoTriagem,
   SinaisVitais,
-  SintomaExtraido
+  SintomaExtraido,
+  Idioma
 } from '@medical/contracts'
 
 export const initialSession: SessaoTriagem = {
@@ -55,6 +56,7 @@ export function triageSessionReducer(
       return {
         ...state,
         sessaoId: action.value.sessaoId,
+        idioma: action.value.idioma,
         sintomasIdentificados: action.value.sintomasIdentificados,
         redFlags: action.value.redFlags,
         perguntas: action.value.perguntas,
@@ -113,10 +115,14 @@ export function respostaDaPergunta(
 
 export function descricaoResposta(
   pergunta: PerguntaAdaptativa,
-  resposta?: RespostaAdaptativa
+  resposta?: RespostaAdaptativa,
+  idioma: Idioma = 'pt-BR'
 ): string {
-  if (!resposta) return 'Não respondido'
-  if (resposta.tipo === 'sim_nao') return resposta.valor ? 'Sim' : 'Não'
+  if (!resposta) return idioma === 'en' ? 'Not answered' : 'Não respondido'
+  if (resposta.tipo === 'sim_nao') {
+    if (idioma === 'en') return resposta.valor ? 'Yes' : 'No'
+    return resposta.valor ? 'Sim' : 'Não'
+  }
   if (resposta.tipo === 'escala') return String(resposta.valor)
   const values =
     resposta.tipo === 'multipla_escolha' ? resposta.valor : [resposta.valor]

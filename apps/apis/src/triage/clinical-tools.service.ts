@@ -7,6 +7,7 @@ import {
   buscarDisponibilidadeConsultorio,
   verificarFaixaVital,
   type AvailabilityResult,
+  type ClinicalLocale,
   type VitalKind,
   type VitalRangeResult
 } from '@medical/clinical'
@@ -23,7 +24,7 @@ export class ClinicalToolsService {
     private readonly clock: ClinicalClock = () => new Date()
   ) {}
 
-  getQwenTools(): QwenTool[] {
+  getQwenTools(idioma: ClinicalLocale = 'pt-BR'): QwenTool[] {
     return [
       {
         name: 'verificarFaixaVital',
@@ -31,7 +32,12 @@ export class ClinicalToolsService {
         inputSchema: VitalRangeArgsSchema,
         execute: input => {
           const args = VitalRangeArgsSchema.parse(input)
-          return this.verificarFaixaVital(args.tipo, args.valor, args.idade)
+          return this.verificarFaixaVital(
+            args.tipo,
+            args.valor,
+            args.idade,
+            idioma
+          )
         }
       },
       {
@@ -40,7 +46,10 @@ export class ClinicalToolsService {
         inputSchema: AvailabilityArgsSchema,
         execute: input => {
           const args = AvailabilityArgsSchema.parse(input)
-          return this.buscarDisponibilidadeConsultorio(args.especialidade)
+          return this.buscarDisponibilidadeConsultorio(
+            args.especialidade,
+            idioma
+          )
         }
       }
     ]
@@ -49,12 +58,16 @@ export class ClinicalToolsService {
   verificarFaixaVital(
     tipo: VitalKind,
     valor: number,
-    idade: number
+    idade: number,
+    idioma: ClinicalLocale = 'pt-BR'
   ): VitalRangeResult {
-    return verificarFaixaVital(tipo, valor, idade)
+    return verificarFaixaVital(tipo, valor, idade, idioma)
   }
 
-  buscarDisponibilidadeConsultorio(especialidade: string): AvailabilityResult {
-    return buscarDisponibilidadeConsultorio(especialidade, this.clock())
+  buscarDisponibilidadeConsultorio(
+    especialidade: string,
+    idioma: ClinicalLocale = 'pt-BR'
+  ): AvailabilityResult {
+    return buscarDisponibilidadeConsultorio(especialidade, this.clock(), idioma)
   }
 }

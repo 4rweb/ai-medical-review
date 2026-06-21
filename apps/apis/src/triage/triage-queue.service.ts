@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common'
 import {
-  MANCHESTER,
+  MANCHESTER_ROTULOS,
   TriagemFilaSubmitRequestSchema,
   type QueuePatient,
   type TriagemFilaSubmitRequest
@@ -12,6 +12,7 @@ import {
   type QueueStore,
   type StoredTriage
 } from './queue-store'
+import { publicMessage } from './triage-i18n'
 
 const PRIORIDADE: Record<QueuePatient['color'], number> = {
   red: 0,
@@ -68,9 +69,11 @@ export class TriageQueueService {
       nomeMascarado: this.maskName(sessao.paciente.nome),
       idade: sessao.paciente.idade,
       color,
-      title: MANCHESTER[nivel].rotulo,
+      nivel,
+      title: MANCHESTER_ROTULOS[sessao.idioma || 'pt-BR'][nivel],
       sintomaPrincipal:
-        sessao.sintomasIdentificados[0]?.rotulo || 'Queixa informada',
+        sessao.sintomasIdentificados[0]?.rotulo ||
+        publicMessage(sessao.idioma || 'pt-BR', 'reportedComplaint'),
       status:
         nivel === 'vermelho' || nivel === 'laranja'
           ? 'atendido_urgente'

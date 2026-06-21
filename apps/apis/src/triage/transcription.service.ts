@@ -12,6 +12,7 @@ import {
 import { parsePayload } from '../common/parse-schema'
 import { QwenService } from '../qwen/qwen.service'
 import { QwenQuotaError, QwenUnavailableError } from '../qwen/qwen.errors'
+import { publicMessage } from './triage-i18n'
 
 @Injectable()
 export class TranscriptionService {
@@ -22,7 +23,8 @@ export class TranscriptionService {
     try {
       const { texto, model } = await this.qwen.transcribeAudio({
         audioBase64: dto.audioBase64,
-        formato: dto.formato
+        formato: dto.formato,
+        idioma: dto.idioma
       })
       return { texto, versaoModelo: model }
     } catch (error) {
@@ -30,8 +32,7 @@ export class TranscriptionService {
         throw new HttpException(
           {
             error: AI_ERROR_CODES.quota,
-            message:
-              'A cota do serviço de IA foi atingida. Digite o relato manualmente.'
+            message: publicMessage(dto.idioma, 'transcriptionQuota')
           },
           HttpStatus.TOO_MANY_REQUESTS
         )
@@ -39,8 +40,7 @@ export class TranscriptionService {
       if (error instanceof QwenUnavailableError) {
         throw new ServiceUnavailableException({
           error: AI_ERROR_CODES.unavailable,
-          message:
-            'Transcrição indisponível no momento. Digite o relato manualmente.'
+          message: publicMessage(dto.idioma, 'transcriptionUnavailable')
         })
       }
       throw error

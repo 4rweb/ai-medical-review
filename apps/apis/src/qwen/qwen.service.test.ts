@@ -75,6 +75,29 @@ const params = {
   tools: [tool]
 }
 
+describe('QwenService transcription locale', () => {
+  it.each([
+    ['pt-BR', 'pt'],
+    ['en', 'en']
+  ] as const)('envia %s como idioma ASR %s', async (idioma, expected) => {
+    const { service, create } = createService([
+      { choices: [{ message: { content: 'transcript' } }] }
+    ])
+
+    await service.transcribeAudio({
+      audioBase64: 'ZmFrZQ==',
+      formato: 'wav',
+      idioma
+    })
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        asr_options: { language: expected, enable_itn: true }
+      })
+    )
+  })
+})
+
 describe('QwenService tool calling', () => {
   it('executa a tool, devolve o resultado ao modelo e registra a trilha', async () => {
     const { service, create } = createService([

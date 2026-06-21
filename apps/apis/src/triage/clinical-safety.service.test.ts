@@ -14,6 +14,7 @@ function request(
 ): ClassificarRequest {
   return {
     sessaoId: 'session-1',
+    idioma: 'pt-BR',
     paciente: {
       nome: 'Paciente Teste',
       idade: 40,
@@ -83,6 +84,40 @@ describe('ClinicalSafetyService', () => {
       expect(result.security.rules).toContain(code)
     }
   )
+
+  it.each([
+    ['Sudden explosive headache, the worst of my life.', 'CEFALEIA_THUNDERCLAP'],
+    [
+      'Chest pain radiating to my arm with cold sweat.',
+      'DOR_TORACICA_ISQUEMICA'
+    ],
+    [
+      'I cannot complete sentences because I am short of breath.',
+      'DISPNEIA_INTENSA'
+    ],
+    [
+      'Sudden weakness on one side and slurred speech.',
+      'AVC_FAST'
+    ],
+    [
+      'Dor no peito radiating to my arm com suor frio.',
+      'DOR_TORACICA_ISQUEMICA'
+    ]
+  ])('detecta red flag em inglês ou relato misto: %s', (texto, code) => {
+    const input = request(texto)
+    input.idioma = 'en'
+    const result = service.enforce(input, {
+      ...greenModel,
+      classificacao: {
+        ...greenModel.classificacao,
+        justificativa: 'The patient reports a stable condition.',
+        fatoresDeterminantes: ['Reported symptoms']
+      }
+    })
+    expect(result.classificacao.nivel).toBe('vermelho')
+    expect(result.security.rules).toContain(code)
+    expect(result.classificacao.justificativa).toContain('[Safety]')
+  })
 
   it('aciona a oitava regra para instabilidade vital', () => {
     const result = service.enforce(
@@ -263,6 +298,29 @@ describe('ClinicalSafetyService', () => {
     )
     expect(sanitized.classificacao.fatoresDeterminantes).toEqual([
       'Início súbito'
+    ])
+  })
+
+  it('remove diagnóstico e conduta escritos em inglês', () => {
+    const sanitized = service.sanitizeModelOutput(
+      {
+        classificacao: {
+          nivel: 'vermelho',
+          confianca: 0.9,
+          justificativa:
+            'Sudden onset requires immediate priority. Possible aneurysm and CT scan are indicated.',
+          fatoresDeterminantes: ['Sudden onset', 'Possible aneurysm']
+        },
+        redFlags: [],
+        emergencia: true
+      },
+      'en'
+    )
+    expect(sanitized.classificacao.justificativa).toBe(
+      'Sudden onset requires immediate priority.'
+    )
+    expect(sanitized.classificacao.fatoresDeterminantes).toEqual([
+      'Sudden onset'
     ])
   })
 })

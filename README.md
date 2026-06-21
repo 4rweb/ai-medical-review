@@ -114,3 +114,9 @@ pnpm --filter mcp inspect   # MCP Inspector via stdio (sobe o processo sob deman
 O modo HTTP usa sessão (`mcp-session-id`): o cliente faz `initialize` e mantém a
 sessão nas chamadas seguintes. Ferramentas expostas: `verificarFaixaVital`,
 `buscarDisponibilidadeConsultorio`.
+
+## Documentação
+
+- [Architecture + diagram](./docs/architecture.md)
+- [Red-flag test script (§14)](./docs/red-flag-tests.md)
+- [Project story](./docs/ai-medical-review-story.md)

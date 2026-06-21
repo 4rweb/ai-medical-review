@@ -34,6 +34,31 @@ async function request<T>(
   schema: Schema<T>,
   init?: RequestInit
 ): Promise<T> {
+  const idioma = (() => {
+    if (typeof init?.body !== 'string') return 'pt-BR'
+    try {
+      const parsed = JSON.parse(init.body) as { idioma?: string }
+      return parsed.idioma === 'en' ? 'en' : 'pt-BR'
+    } catch {
+      return 'pt-BR'
+    }
+  })()
+  const messages =
+    idioma === 'en'
+      ? {
+          requestFailed: 'The AI service could not be reached.',
+          invalidResponse:
+            'The API returned data that is incompatible with the application.',
+          timeout: 'The AI service took longer than expected.',
+          unavailable: 'The AI service is currently unavailable.'
+        }
+      : {
+          requestFailed: 'Não foi possível acessar o serviço de IA.',
+          invalidResponse:
+            'A API retornou dados incompatíveis com o aplicativo.',
+          timeout: 'O serviço de IA demorou mais que o esperado.',
+          unavailable: 'Serviço de IA indisponível no momento.'
+        }
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), 50_000)
 
@@ -55,7 +80,7 @@ async function request<T>(
       throw new ApiError(
         typeof body.message === 'string'
           ? body.message
-          : 'Não foi possível acessar o serviço de IA.',
+          : messages.requestFailed,
         typeof body.error === 'string' ? body.error : 'REQUEST_FAILED',
         response.status
       )
@@ -64,7 +89,7 @@ async function request<T>(
     const parsed = schema.safeParse(body)
     if (!parsed.success) {
       throw new ApiError(
-        'A API retornou dados incompatíveis com o aplicativo.',
+        messages.invalidResponse,
         'INVALID_API_RESPONSE',
         502
       )
@@ -74,13 +99,13 @@ async function request<T>(
     if (error instanceof ApiError) throw error
     if (error instanceof DOMException && error.name === 'AbortError') {
       throw new ApiError(
-        'O serviço de IA demorou mais que o esperado.',
+        messages.timeout,
         'AI_SERVICE_TIMEOUT',
         503
       )
     }
     throw new ApiError(
-      'Serviço de IA indisponível no momento.',
+      messages.unavailable,
       'AI_SERVICE_UNAVAILABLE',
       503
     )

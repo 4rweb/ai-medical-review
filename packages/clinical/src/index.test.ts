@@ -31,6 +31,13 @@ describe('verificarFaixaVital', () => {
     expect(result.idadeInformada).toBe(5)
     expect(result.observacao).toContain('adultos')
   })
+
+  it('localiza referências e observações sem alterar a faixa canônica', () => {
+    const result = verificarFaixaVital('spo2', 87, 40, 'en')
+    expect(result.faixa).toBe('baixo_critico')
+    expect(result.referencia).toContain('critical')
+    expect(result.observacao).toContain('adult')
+  })
 })
 
 describe('buscarDisponibilidadeConsultorio', () => {
@@ -41,6 +48,13 @@ describe('buscarDisponibilidadeConsultorio', () => {
       local: 'Consultório 7 - Ala A',
       proximoSlot: '2026-06-20T12:45:00.000Z'
     })
+  })
+
+  it('localiza o endereço do encaixe', () => {
+    const now = new Date('2026-06-20T12:00:00.000Z')
+    expect(buscarDisponibilidadeConsultorio('Cardiology', now, 'en').local).toBe(
+      'Consulting room 7 - Wing A'
+    )
   })
 })
 

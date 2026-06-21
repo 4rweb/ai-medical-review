@@ -1,6 +1,9 @@
 import { z } from 'zod'
 
-export const CONTRATO_VERSAO = '2.1.0'
+export const CONTRATO_VERSAO = '3.0.0'
+
+export const IdiomaSchema = z.enum(['pt-BR', 'en'])
+export type Idioma = z.infer<typeof IdiomaSchema>
 
 export const NivelManchesterSchema = z.enum([
   'vermelho',
@@ -155,7 +158,8 @@ export type AudioFormat = z.infer<typeof AudioFormatSchema>
 
 export const TranscreverRequestSchema = z.object({
   audioBase64: z.string().min(1),
-  formato: AudioFormatSchema
+  formato: AudioFormatSchema,
+  idioma: IdiomaSchema
 })
 export type TranscreverRequest = z.infer<typeof TranscreverRequestSchema>
 
@@ -166,6 +170,7 @@ export const TranscreverResponseSchema = z.object({
 export type TranscreverResponse = z.infer<typeof TranscreverResponseSchema>
 
 export const AnalisarRelatoRequestSchema = z.object({
+  idioma: IdiomaSchema,
   paciente: DadosPacienteSchema,
   relato: RelatoSchema
 })
@@ -173,6 +178,7 @@ export type AnalisarRelatoRequest = z.infer<typeof AnalisarRelatoRequestSchema>
 
 export const AnalisarRelatoResponseSchema = z.object({
   sessaoId: z.string().min(1),
+  idioma: IdiomaSchema,
   sintomasIdentificados: z.array(SintomaExtraidoSchema).max(20),
   redFlags: z.array(RedFlagSchema).max(20),
   perguntas: z.array(PerguntaAdaptativaSchema).min(1).max(10),
@@ -185,6 +191,7 @@ export type AnalisarRelatoResponse = z.infer<
 
 export const ClassificarRequestSchema = z.object({
   sessaoId: z.string().min(1),
+  idioma: IdiomaSchema,
   paciente: DadosPacienteSchema,
   relato: RelatoSchema,
   sintomasIdentificados: z.array(SintomaExtraidoSchema),
@@ -218,6 +225,7 @@ export type Agendamento = z.infer<typeof AgendamentoSchema>
 
 export const ClassificarResponseSchema = z.object({
   sessaoId: z.string().min(1),
+  idioma: IdiomaSchema,
   classificacao: ClassificacaoModeloSchema.shape.classificacao,
   esperaEstimada: z.object({
     min: z.number().int().min(0),
@@ -242,6 +250,7 @@ export type ClassificarResponse = z.infer<typeof ClassificarResponseSchema>
 
 export const SessaoTriagemSchema = z.object({
   sessaoId: z.string().optional(),
+  idioma: IdiomaSchema.optional(),
   paciente: DadosPacienteSchema.partial(),
   relato: RelatoSchema.optional(),
   sintomasIdentificados: z.array(SintomaExtraidoSchema),
@@ -280,6 +289,8 @@ export const QueuePatientSchema = z.object({
   nomeMascarado: z.string(),
   idade: z.number().int(),
   color: QueueColorSchema,
+  nivel: NivelManchesterSchema,
+  /** @deprecated Renderize o rótulo a partir de `nivel` no locale do cliente. */
   title: z.string(),
   sintomaPrincipal: z.string(),
   status: QueueStatusSchema,
@@ -340,6 +351,66 @@ export const RECOMENDACOES_POR_NIVEL: Record<NivelManchester, string[]> = {
     'Informe se houver mudança ou piora dos sintomas.',
     'A equipe poderá orientar o serviço mais adequado.'
   ]
+}
+
+export const MANCHESTER_ROTULOS: Record<
+  Idioma,
+  Record<NivelManchester, string>
+> = {
+  'pt-BR': {
+    vermelho: 'Emergência',
+    laranja: 'Muito urgente',
+    amarelo: 'Urgente',
+    verde: 'Pouco urgente',
+    azul: 'Não urgente'
+  },
+  en: {
+    vermelho: 'Emergency',
+    laranja: 'Very urgent',
+    amarelo: 'Urgent',
+    verde: 'Less urgent',
+    azul: 'Non-urgent'
+  }
+}
+
+export const RECOMENDACOES_POR_IDIOMA: Record<
+  Idioma,
+  Record<NivelManchester, string[]>
+> = {
+  'pt-BR': RECOMENDACOES_POR_NIVEL,
+  en: {
+    vermelho: [
+      'Immediately seek the triage team or call SAMU at 192.',
+      'Do not remain alone while waiting for care.',
+      'Immediately report any worsening or change in consciousness.'
+    ],
+    laranja: [
+      'Report immediately to the triage team.',
+      'Remain close to reception and report any worsening.',
+      'Do not leave the facility before being assessed by the team.'
+    ],
+    amarelo: [
+      'Wait in an area close to the triage team.',
+      'Report immediately if your symptoms worsen.',
+      'Follow the in-person instructions provided by the healthcare team.'
+    ],
+    verde: [
+      'Wait to be called according to clinical priority.',
+      'Tell the team if symptoms worsen or a new symptom appears.',
+      'This classification may be reviewed in person.'
+    ],
+    azul: [
+      'Wait for instructions from the reception team.',
+      'Report any change or worsening of symptoms.',
+      'The team may direct you to the most appropriate service.'
+    ]
+  }
+}
+
+export const DISCLAIMER_POR_IDIOMA: Record<Idioma, string> = {
+  'pt-BR':
+    'Pré-triagem para apoio à organização do atendimento. Não é diagnóstico e não substitui avaliação presencial.',
+  en: 'Pre-triage support for organizing care. This is not a diagnosis and does not replace an in-person assessment.'
 }
 
 export function isRespostaPreenchida(

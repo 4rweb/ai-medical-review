@@ -65,17 +65,19 @@ export class QwenService {
    *
    * O ASR dedicado aceita SOMENTE a parte `input_audio` (sem system prompt, sem
    * texto, sem campo `format`) + `asr_options` no corpo. O áudio vai como data
-   * URI base64. Modelo/idioma configuráveis por QWEN_ASR_MODEL / QWEN_ASR_LANGUAGE.
+   * URI base64. O modelo é configurável por QWEN_ASR_MODEL e o idioma vem
+   * explicitamente de cada sessão.
    * Ref.: https://www.alibabacloud.com/help/en/model-studio/qwen-asr-api-reference
    */
   async transcribeAudio(params: {
     audioBase64: string
     formato: string
+    idioma: 'pt-BR' | 'en'
   }): Promise<{ texto: string; model: string }> {
     const client = this.getClient()
     const model =
       this.config.get<string>('QWEN_ASR_MODEL') || 'qwen3-asr-flash'
-    const language = this.config.get<string>('QWEN_ASR_LANGUAGE') || 'pt'
+    const language = params.idioma === 'en' ? 'en' : 'pt'
     const dataUri = params.audioBase64.startsWith('data:')
       ? params.audioBase64
       : `data:audio/${params.formato};base64,${params.audioBase64}`

@@ -2,10 +2,16 @@ import { Injectable, Logger } from '@nestjs/common'
 import type {
   ClassificarRequest,
   ClassificacaoModelo,
+  Idioma,
   NivelManchester,
   RedFlag
 } from '@medical/contracts'
 import { mergeRedFlags } from '@medical/contracts'
+import {
+  safeFallbackExplanation,
+  safeFallbackFactor,
+  safetyElevationText
+} from './triage-i18n'
 
 const PRIORIDADE: Record<NivelManchester, number> = {
   vermelho: 0,
@@ -25,7 +31,6 @@ type ClinicalContext = {
 
 type RuleMatch = {
   code: string
-  description: string
   requiredLevel: NivelManchester
 }
 
@@ -33,116 +38,126 @@ type SafetyRule = (context: ClinicalContext) => RuleMatch | null
 
 const match = (
   code: string,
-  description: string,
   requiredLevel: NivelManchester
-): RuleMatch => ({ code, description, requiredLevel })
+): RuleMatch => ({ code, requiredLevel })
+
+const RULE_DESCRIPTIONS: Record<string, Record<Idioma, string>> = {
+  CEFALEIA_THUNDERCLAP: {
+    'pt-BR':
+      'Cefaleia súbita, explosiva ou descrita como a pior dor da vida.',
+    en: 'Sudden or explosive headache described as the worst headache of the patient’s life.'
+  },
+  DOR_TORACICA_ISQUEMICA: {
+    'pt-BR': 'Dor torácica com irradiação ou sudorese fria.',
+    en: 'Chest pain with radiation or cold sweat.'
+  },
+  DOR_TORACICA_ALERTA: {
+    'pt-BR': 'Dor torácica acompanhada de outro sinal de alerta.',
+    en: 'Chest pain accompanied by another warning sign.'
+  },
+  DISPNEIA_INTENSA: {
+    'pt-BR': 'Falta de ar com incapacidade de completar frases.',
+    en: 'Shortness of breath with inability to complete sentences.'
+  },
+  DISPNEIA_ALERTA: {
+    'pt-BR': 'Falta de ar descrita como intensa ou em piora.',
+    en: 'Shortness of breath described as severe or worsening.'
+  },
+  AVC_FAST: {
+    'pt-BR': 'Sinal neurológico focal compatível com o protocolo FAST.',
+    en: 'Focal neurological warning sign consistent with the FAST protocol.'
+  },
+  ALTERACAO_CONSCIENCIA: {
+    'pt-BR': 'Alteração de consciência, desmaio ou convulsão.',
+    en: 'Altered consciousness, fainting or seizure.'
+  },
+  SANGRAMENTO_TRAUMA_GRAVE: {
+    'pt-BR': 'Sangramento intenso ou trauma de alta energia.',
+    en: 'Severe bleeding or high-energy trauma.'
+  },
+  INSTABILIDADE_VITAL: {
+    'pt-BR': 'Sinais vitais informados em faixa de instabilidade.',
+    en: 'Reported vital signs are in an unstable range.'
+  }
+}
 
 const RULES: SafetyRule[] = [
   context => {
-    const headache = /(dor de cabeca|cefaleia|cabeca|nuca)/.test(context.text)
+    const headache =
+      /(dor de cabeca|cefaleia|cabeca|nuca|headache|head pain|neck pain)/.test(
+        context.text
+      )
     const sudden =
-      /(subit|de repente|do nada|explos|estouro|pior da minha vida|pior dor)/.test(
+      /(subit|de repente|do nada|explos|estouro|pior da minha vida|pior dor|sudden|suddenly|out of nowhere|worst (headache|pain) of my life)/.test(
         context.text
       )
     return headache && sudden
-      ? match(
-          'CEFALEIA_THUNDERCLAP',
-          'Cefaleia súbita, explosiva ou descrita como a pior dor da vida.',
-          'vermelho'
-        )
+      ? match('CEFALEIA_THUNDERCLAP', 'vermelho')
       : null
   },
   context => {
     const chestPain =
-      /((dor|pressao|aperto|peso).{0,35}(peito|torac))|((peito|torac).{0,25}(doi|dor|aperto|pressao))/.test(
+      /((dor|pressao|aperto|peso|pain|pressure|tightness|heaviness).{0,35}(peito|torac|chest))|((peito|torac|chest).{0,25}(doi|dor|aperto|pressao|pain|hurt|tight))/.test(
         context.text
       )
     if (!chestPain) return null
 
     const ischemicPattern =
-      /(irradi|braco|mandibula|queixo|suor frio|sudorese|suando frio)/.test(
+      /(irradi|braco|mandibula|queixo|suor frio|sudorese|suando frio|radiat|arm|jaw|cold sweat|sweating)/.test(
         context.text
       )
     if (ischemicPattern) {
-      return match(
-        'DOR_TORACICA_ISQUEMICA',
-        'Dor torácica com irradiação ou sudorese fria.',
-        'vermelho'
-      )
+      return match('DOR_TORACICA_ISQUEMICA', 'vermelho')
     }
 
-    return /(falta de ar|nause|enjoo|costas)/.test(context.text)
-      ? match(
-          'DOR_TORACICA_ALERTA',
-          'Dor torácica acompanhada de outro sinal de alerta.',
-          'laranja'
-        )
+    return /(falta de ar|nause|enjoo|costas|shortness of breath|nausea|back pain)/.test(
+      context.text
+    )
+      ? match('DOR_TORACICA_ALERTA', 'laranja')
       : null
   },
   context => {
     const dyspnea =
-      /(falta de ar|dificuldade para respirar|nao consigo respirar|sem ar|sufoc|ofegante|dispne)/.test(
+      /(falta de ar|dificuldade para respirar|nao consigo respirar|sem ar|sufoc|ofegante|dispne|shortness of breath|short of breath|difficulty breathing|cannot breathe|can't breathe|breathless|choking|dyspn)/.test(
         context.text
       )
     if (!dyspnea) return null
 
     const cannotSpeak =
-      /((nao consigo|nao consegue).{0,25}(falar|completar|frase)|nao completa.{0,15}frase|incapaz.{0,20}frase)/.test(
+      /((nao consigo|nao consegue|cannot|can't|unable to).{0,25}(falar|completar|frase|speak|complete|sentence)|nao completa.{0,15}frase|incapaz.{0,20}frase|cannot complete sentences|can't complete sentences)/.test(
         context.text
       )
     if (cannotSpeak) {
-      return match(
-        'DISPNEIA_INTENSA',
-        'Falta de ar com incapacidade de completar frases.',
-        'vermelho'
-      )
+      return match('DISPNEIA_INTENSA', 'vermelho')
     }
 
-    return /(intens|sever|muito|piorando)/.test(context.text)
-      ? match(
-          'DISPNEIA_ALERTA',
-          'Falta de ar descrita como intensa ou em piora.',
-          'laranja'
-        )
+    return /(intens|sever|muito|piorando|worsening|getting worse)/.test(
+      context.text
+    )
+      ? match('DISPNEIA_ALERTA', 'laranja')
       : null
   },
   context =>
-    /(fala arrastada|fala embolada|nao consigo falar|boca torta|rosto torto|assimetria facial|fraqueza.{0,30}(lado|metade)|dormencia.{0,30}(lado|metade)|um lado do corpo|perda de forca.{0,30}(lado|metade)|paralis)/.test(
+    /(fala arrastada|fala embolada|nao consigo falar|boca torta|rosto torto|assimetria facial|fraqueza.{0,30}(lado|metade)|dormencia.{0,30}(lado|metade)|um lado do corpo|perda de forca.{0,30}(lado|metade)|paralis|slurred speech|facial droop|face droop|one[- ]sided weakness|weakness.{0,30}one side|numbness.{0,30}one side|cannot speak|can't speak|paraly)/.test(
       context.text
     )
-      ? match(
-          'AVC_FAST',
-          'Sinal neurológico focal compatível com o protocolo FAST.',
-          'vermelho'
-        )
+      ? match('AVC_FAST', 'vermelho')
       : null,
   context =>
-    /(desmai|desacord|inconsci|convuls|nao acorda|nao responde|confusao intensa|alteracao de consciencia)/.test(
+    /(desmai|desacord|inconsci|convuls|nao acorda|nao responde|confusao intensa|alteracao de consciencia|faint|unconscious|unresponsive|seizure|won't wake|will not wake|altered consciousness|severe confusion)/.test(
       context.text
     )
-      ? match(
-          'ALTERACAO_CONSCIENCIA',
-          'Alteração de consciência, desmaio ou convulsão.',
-          'vermelho'
-        )
+      ? match('ALTERACAO_CONSCIENCIA', 'vermelho')
       : null,
   context =>
-    /(muito sangue|hemorragia|sangrando muito|sangramento intenso|nao para de sangrar|trauma grave|acidente grave|atropel|queda.{0,20}altura)/.test(
+    /(muito sangue|hemorragia|sangrando muito|sangramento intenso|nao para de sangrar|trauma grave|acidente grave|atropel|queda.{0,20}altura|heavy bleeding|severe bleeding|won't stop bleeding|will not stop bleeding|major trauma|severe accident|hit by a car|fall.{0,20}height)/.test(
       context.text
     )
-      ? match(
-          'SANGRAMENTO_TRAUMA_GRAVE',
-          'Sangramento intenso ou trauma de alta energia.',
-          'vermelho'
-        )
+      ? match('SANGRAMENTO_TRAUMA_GRAVE', 'vermelho')
       : null,
   context => {
     if (typeof context.spo2 !== 'number' || context.spo2 >= 92) return null
-    return match(
-      'HIPOXEMIA',
-      `Saturação de oxigênio informada em ${context.spo2}%.`,
-      context.spo2 < 88 ? 'vermelho' : 'laranja'
-    )
+    return match('HIPOXEMIA', context.spo2 < 88 ? 'vermelho' : 'laranja')
   },
   context => {
     const hypotension =
@@ -155,11 +170,7 @@ const RULES: SafetyRule[] = [
       context.temperature >= 39.5
 
     return hypotension || feverWithTachycardia
-      ? match(
-          'INSTABILIDADE_VITAL',
-          'Sinais vitais informados em faixa de instabilidade.',
-          'laranja'
-        )
+      ? match('INSTABILIDADE_VITAL', 'laranja')
       : null
   }
 ]
@@ -235,7 +246,12 @@ export class ClinicalSafetyService {
     return {
       flags: matched.map(result => ({
         codigo: result.code,
-        descricao: result.description,
+        descricao:
+          result.code === 'HIPOXEMIA'
+            ? request.idioma === 'en'
+              ? `Reported oxygen saturation is ${context.spo2}%.`
+              : `Saturação de oxigênio informada em ${context.spo2}%.`
+            : RULE_DESCRIPTIONS[result.code]?.[request.idioma] || result.code,
         severidade: result.requiredLevel === 'vermelho' ? 'alta' : 'media'
       })),
       requiredLevel: mostSevere(matched.map(result => result.requiredLevel)),
@@ -255,7 +271,7 @@ export class ClinicalSafetyService {
     }
   } {
     const evaluation = this.evaluate(request)
-    const sanitized = this.sanitizeModelOutput(model)
+    const sanitized = this.sanitizeModelOutput(model, request.idioma)
     const originalLevel = sanitized.classificacao.nivel
     const shouldElevate =
       evaluation.requiredLevel !== undefined &&
@@ -271,7 +287,7 @@ export class ClinicalSafetyService {
     }
 
     const safetyExplanation = shouldElevate
-      ? `${sanitized.classificacao.justificativa}\n\n[Segurança] Classificação elevada de "${originalLevel}" para "${finalLevel}" pelas regras determinísticas: ${evaluation.rules.join(', ')}.`
+      ? `${sanitized.classificacao.justificativa}\n\n${safetyElevationText(request.idioma, originalLevel, finalLevel, evaluation.rules)}`
       : sanitized.classificacao.justificativa
     const factors = shouldElevate
       ? [
@@ -305,15 +321,18 @@ export class ClinicalSafetyService {
     }
   }
 
-  sanitizeModelOutput(model: ClassificacaoModelo): ClassificacaoModelo {
+  sanitizeModelOutput(
+    model: ClassificacaoModelo,
+    idioma: Idioma = 'pt-BR'
+  ): ClassificacaoModelo {
     const prohibited =
-      /diagn[oó]st|tomograf|resson|raio.?x|exame|medicamento|medica[cç][aã]o|jejum|tratamento|prescri|aneurisma|infarto|avc|hemorragia|cirurgia/i
+      /diagn[oó]st|tomograf|resson|raio.?x|exame|medicamento|medica[cç][aã]o|jejum|tratamento|prescri|aneurisma|infarto|avc|hemorragia|cirurgia|diagnos|ct scan|mri|x-?ray|exam|test|medication|medicine|fasting|treatment|prescri|aneurysm|heart attack|stroke|hemorrhage|surgery/i
     const safeSentences = model.classificacao.justificativa
       .split(/(?<=[.!?])\s+/)
       .filter(sentence => !prohibited.test(sentence))
     const justificativa =
       safeSentences.join(' ').trim() ||
-      'A prioridade foi definida a partir da gravidade e do início dos sintomas informados.'
+      safeFallbackExplanation(idioma)
     const fatoresDeterminantes = model.classificacao.fatoresDeterminantes.filter(
       factor => !prohibited.test(factor)
     )
@@ -326,7 +345,7 @@ export class ClinicalSafetyService {
         fatoresDeterminantes:
           fatoresDeterminantes.length > 0
             ? fatoresDeterminantes
-            : ['Gravidade dos sintomas relatados']
+            : [safeFallbackFactor(idioma)]
       }
     }
   }

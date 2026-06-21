@@ -81,6 +81,13 @@ export class DbQueueStore implements QueueStore {
   }
 
   private toStored(row: typeof triageQueue.$inferSelect): StoredTriage {
+    const nivel = {
+      red: 'vermelho',
+      orange: 'laranja',
+      yellow: 'amarelo',
+      green: 'verde',
+      blue: 'azul'
+    }[row.color] as QueuePatient['nivel']
     const publicPatient: QueuePatient = {
       sessaoId: row.sessaoId,
       id: row.sessaoId,
@@ -89,6 +96,7 @@ export class DbQueueStore implements QueueStore {
       nomeMascarado: row.nomeMascarado,
       idade: row.idade,
       color: row.color as QueueColor,
+      nivel,
       title: row.title,
       sintomaPrincipal: row.sintomaPrincipal,
       status: row.status as QueueStatus,

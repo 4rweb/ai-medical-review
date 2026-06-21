@@ -29,7 +29,7 @@ describe('ClinicalToolsGatewayService', () => {
       factory
     )
     const tool = gateway
-      .getQwenTools()
+      .getQwenTools('en')
       .find(item => item.name === 'buscarDisponibilidadeConsultorio')
 
     await gateway.prepare()
@@ -39,7 +39,7 @@ describe('ClinicalToolsGatewayService', () => {
     expect(listTools).toHaveBeenCalledWith(2_500)
     expect(callTool).toHaveBeenCalledWith(
       'buscarDisponibilidadeConsultorio',
-      { especialidade: 'Cardiologia' },
+      { especialidade: 'Cardiologia', idioma: 'en' },
       2_500
     )
     expect(result).toEqual({

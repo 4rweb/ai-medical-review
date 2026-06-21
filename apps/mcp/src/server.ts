@@ -35,13 +35,13 @@ function createServer(): McpServer {
   server.registerTool(
     'verificarFaixaVital',
     {
-      title: 'Verificar faixa de sinal vital',
+      title: 'Verificar faixa de sinal vital / Check vital-sign range',
       description: VITAL_RANGE_DESCRIPTION,
       inputSchema: VitalRangeArgsSchema.shape
     },
-    async ({ tipo, valor, idade }) => {
+    async ({ tipo, valor, idade, idioma }) => {
       console.error('[mcp] tool verificarFaixaVital executada')
-      const result = verificarFaixaVital(tipo, valor, idade)
+      const result = verificarFaixaVital(tipo, valor, idade, idioma)
       return { content: [{ type: 'text', text: JSON.stringify(result) }] }
     }
   )
@@ -49,13 +49,17 @@ function createServer(): McpServer {
   server.registerTool(
     'buscarDisponibilidadeConsultorio',
     {
-      title: 'Buscar disponibilidade de consultório',
+      title: 'Buscar disponibilidade / Find appointment availability',
       description: AVAILABILITY_DESCRIPTION,
       inputSchema: AvailabilityArgsSchema.shape
     },
-    async ({ especialidade }) => {
+    async ({ especialidade, idioma }) => {
       console.error('[mcp] tool buscarDisponibilidadeConsultorio executada')
-      const result = buscarDisponibilidadeConsultorio(especialidade)
+      const result = buscarDisponibilidadeConsultorio(
+        especialidade,
+        new Date(),
+        idioma
+      )
       return { content: [{ type: 'text', text: JSON.stringify(result) }] }
     }
   )
